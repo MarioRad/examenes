@@ -148,18 +148,16 @@ app.post('/login', async (req, res) => {
     });
   }
 
-  // Si la materia define fecha/hora de apertura y cierre del examen, esa ventana
-  // manda; si no, se mantiene el horario semanal del grupo.
+  // 1) Solo se puede ingresar en el dia y horario habilitados para el grupo.
+  const horario = await validarHorario(alumno.grupo_id);
+  if (!horario.ok) {
+    return renderLogin(res, { error: horario.motivo, documento });
+  }
+
+  // 2) Si la materia ademas define una ventana de fechas, tambien debe estar abierta.
   const ventanaMateria = ventanaExamen(alumno, tsServidor());
-  if (ventanaMateria) {
-    if (!ventanaMateria.ok) {
-      return renderLogin(res, { error: ventanaMateria.motivo, documento });
-    }
-  } else {
-    const horario = await validarHorario(alumno.grupo_id);
-    if (!horario.ok) {
-      return renderLogin(res, { error: horario.motivo, documento });
-    }
+  if (ventanaMateria && !ventanaMateria.ok) {
+    return renderLogin(res, { error: ventanaMateria.motivo, documento });
   }
 
   const inicio = Date.now();
@@ -196,12 +194,13 @@ app.get('/examen', requiereAlumno, bloqueaSiYaEntrego, async (req, res) => {
   const restante = Math.max(0, Math.min(duracionExamenMs(alumno), enRango));
 
   const ventanaFechas = etiquetaVentana(alumno);
+  const ventanaGrupo = `del grupo ${await ventanaDe(alumno.grupo_id)}`;
   res.render('examen', {
     alumno,
     preguntas,
     restanteMs: restante,
     serverNow: Date.now(),
-    ventana: ventanaFechas || `del grupo ${await ventanaDe(alumno.grupo_id)}`
+    ventana: ventanaFechas ? `${ventanaFechas} (${ventanaGrupo})` : ventanaGrupo
   });
 });
 

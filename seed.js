@@ -67,7 +67,7 @@ async function upsertMateria({ nombre, institucion }) {
     [nombre, instId]
   );
   if (existente) return existente.id;
-  return (await stmts.crearMateria.run(nombre, instId)).lastInsertRowid;
+  return (await stmts.crearMateria.run(nombre, instId, null, null, null)).lastInsertRowid;
 }
 
 async function seed() {
