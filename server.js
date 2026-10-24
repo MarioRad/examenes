@@ -22,7 +22,7 @@ const {
   minutosHastaVentana
 } = require('./lib/horarios');
 const { evaluarChoice } = require('./lib/grading');
-const { generarPdf } = require('./lib/pdf');
+const { generarPdf, generarPlanillaPdf } = require('./lib/pdf');
 const { enviarPdf } = require('./lib/mailer');
 
 const app = express();
@@ -521,6 +521,45 @@ app.get('/admin/pdf/:id', requiereAdmin, async (req, res) => {
   }
 });
 
+/** Planilla de notas de una materia: encabezado institucional + tabla alfabetica. */
+app.get('/admin/planilla/:id', requiereAdmin, async (req, res) => {
+  const id = Number(req.params.id);
+  const materia = await stmts.getMateria.get(id);
+  if (!materia) return res.status(404).send('Materia inexistente.');
+
+  const filas = await stmts.alumnosDeMateriaConNota.all(id);
+  const alumnos = filas
+    .map((a) => {
+      const partes = String(a.nombre || '').trim().split(/\s+/);
+      return {
+        documento: a.documento,
+        apellido: partes.length > 1 ? partes[partes.length - 1] : '',
+        nombre: partes.slice(0, -1).join(' '),
+        nota: a.puntaje_total_obtenido == null ? null : Number(a.puntaje_total_obtenido)
+      };
+    })
+    .sort((x, y) =>
+      `${x.apellido} ${x.nombre}`.localeCompare(`${y.apellido} ${y.nombre}`, 'es', {
+        sensitivity: 'base'
+      })
+    );
+
+  try {
+    const { filePath } = await generarPlanillaPdf({
+      institucion: materia.institucion_nombre || '—',
+      materia: materia.nombre,
+      fecha: fechaCorta(tsServidor()).split(' - ')[0],
+      profesor: materia.profesor || '—',
+      alumnos
+    });
+    const nombreArchivo = `planilla_${materia.nombre}`.replace(/[^\w.-]+/g, '_') + '.pdf';
+    res.download(filePath, nombreArchivo);
+  } catch (e) {
+    console.error('[planilla]', e);
+    res.status(500).send('Error al generar la planilla.');
+  }
+});
+
 app.get('/admin/preview/:id', requiereAdmin, async (req, res) => {
   const datos = await prepararDatosPdf(Number(req.params.id));
   if (!datos) return res.status(404).send('Entrega inexistente.');
@@ -695,6 +734,9 @@ function leerMateriaForm(body) {
     throw new Error('Duracion invalida: usa HH:MM (maximo 24:00).');
   }
 
+  const profesor = String(body.profesor || '').trim();
+  if (profesor.length > 100) throw new Error('Profesor demasiado largo (max 100).');
+
   const desde = normalizarFechaHora(body.disponible_desde);
   const hasta = normalizarFechaHora(body.disponible_hasta);
   if (desde === undefined || hasta === undefined) throw new Error('Fecha y hora invalidas.');
@@ -709,7 +751,8 @@ function leerMateriaForm(body) {
     nombre,
     duracion_minutos: duracion,
     disponible_desde: desde,
-    disponible_hasta: hasta
+    disponible_hasta: hasta,
+    profesor: profesor || null
   };
 }
 
@@ -723,7 +766,8 @@ app.post('/admin/materias', requiereAdmin, async (req, res) => {
       institucion_id,
       m.duracion_minutos,
       m.disponible_desde,
-      m.disponible_hasta
+      m.disponible_hasta,
+      m.profesor
     );
     res.redirect('/admin/instituciones?ok=Materia+creada');
   } catch (e) {
@@ -739,6 +783,7 @@ app.post('/admin/materias/:id/editar', requiereAdmin, async (req, res) => {
       m.duracion_minutos,
       m.disponible_desde,
       m.disponible_hasta,
+      m.profesor,
       Number(req.params.id)
     );
     res.redirect('/admin/instituciones?ok=Materia+actualizada');

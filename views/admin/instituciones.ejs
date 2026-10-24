@@ -132,6 +132,10 @@
             <label for="matHasta">Disponible hasta</label>
             <input type="datetime-local" id="matHasta" name="disponible_hasta" />
           </div>
+          <div>
+            <label for="matProfesor">Profesor a cargo</label>
+            <input type="text" id="matProfesor" name="profesor" maxlength="100" placeholder="Ej: Prof. Ana Perez" />
+          </div>
           <p class="muted">
             El alumno dispone del tiempo de resolucion desde que ingresa. Sin fechas, el acceso
             se rige por el horario del grupo.
@@ -159,7 +163,10 @@
               <tbody>
                 <% materias.forEach(function(m) { %>
                   <tr data-id="<%= m.id %>">
-                    <td><b><%= m.nombre %></b></td>
+                    <td>
+                      <b><%= m.nombre %></b>
+                      <% if (m.profesor) { %><div class="muted">Prof. <%= m.profesor %></div><% } %>
+                    </td>
                     <td><%= m.institucion_nombre || '—' %></td>
                     <td><%= m.alumnos %></td>
                     <td><%= m.preguntas %></td>
@@ -177,6 +184,7 @@
                       </div>
                     </td>
                     <td class="c-acciones">
+                      <a class="btn btn-sm btn-ghost" href="/admin/planilla/<%= m.id %>" title="Planilla de notas en PDF">Planilla</a>
                       <button type="button" class="btn btn-sm btn-ghost btn-editar">Editar</button>
                       <form
                         method="POST"
@@ -201,6 +209,15 @@
                             value="<%= String(Math.floor(durEd / 60)).padStart(2, '0') %>:<%= String(durEd % 60).padStart(2, '0') %>"
                             aria-label="Duracion HH:MM"
                             style="max-width:110px"
+                          />
+                          <input
+                            type="text"
+                            name="profesor"
+                            value="<%= m.profesor || '' %>"
+                            maxlength="100"
+                            placeholder="Profesor a cargo"
+                            aria-label="Profesor a cargo"
+                            style="max-width:180px"
                           />
                           <input
                             type="datetime-local"
