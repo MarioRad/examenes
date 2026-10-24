@@ -65,6 +65,13 @@ function tsServidor(d = new Date()) {
   return `${p.year}-${p.month}-${p.day} ${p.hour === '24' ? '00' : p.hour}:${p.minute}:${p.second}`;
 }
 
+/** Puntaje con hasta 2 decimales (acepta coma o punto). */
+function puntaje(n) {
+  const v = Number(String(n == null ? '' : n).replace(',', '.'));
+  if (!Number.isFinite(v)) return 0;
+  return Math.round(Math.max(0, v) * 100) / 100;
+}
+
 /** 'YYYY-MM-DD HH:MM:SS' -> 'dd/mm/aaaa - hh:mm' (zona America/Argentina/Salta). */
 function fechaCorta(ts) {
   const m = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/.exec(String(ts || ''));
@@ -390,7 +397,8 @@ app.post('/admin/calificar/:id', requiereAdmin, async (req, res) => {
     return res.status(400).json({ ok: false, error: 'Puntaje invalido.' });
   }
 
-  await stmts.calificarDesarrollo.run(Math.round(puntos), Math.round(puntos), id);
+  const puntosRedondeados = puntaje(puntos);
+  await stmts.calificarDesarrollo.run(puntosRedondeados, puntosRedondeados, id);
   const actualizada = await stmts.getRespuestaById.get(id);
 
   const datos = await prepararDatosPdf(id);
@@ -480,8 +488,11 @@ app.get('/admin/preview/:id', requiereAdmin, async (req, res) => {
 app.get('/admin/preguntas', requiereAdmin, async (req, res) => {
   const materiaSel = Number(req.query.materia) || 0;
   const todas = await stmts.listarPreguntas.all();
+  const visibles = materiaSel ? todas.filter((p) => p.materia_id === materiaSel) : todas;
+  const totalPuntos = puntaje(visibles.reduce((a, p) => a + (Number(p.puntos) || 0), 0));
   res.render('admin/preguntas', {
-    preguntas: materiaSel ? todas.filter((p) => p.materia_id === materiaSel) : todas,
+    preguntas: visibles,
+    totalPuntos,
     materias: await stmts.listarMaterias.all(),
     materiaSel,
     ok: req.query.ok || null,
@@ -492,7 +503,7 @@ app.get('/admin/preguntas', requiereAdmin, async (req, res) => {
 function leerPreguntaForm(body) {
   const texto = String(body.texto || '').trim();
   const tipo = body.tipo === 'choice' ? 'choice' : 'desarrollo';
-  const puntos = Math.max(0, Math.round(Number(body.puntos) || 0));
+  const puntos = puntaje(body.puntos);
   const materia_id = Number(body.materia_id) || null;
   if (!materia_id) throw new Error('Elegi la materia de la pregunta.');
 

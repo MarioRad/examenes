@@ -119,7 +119,7 @@
             : '<span class="muted">sin entrega</span>';
 
           const nota = id
-            ? `<input type="number" min="0" step="1" class="input-nota"
+            ? `<input type="number" min="0" step="0.01" class="input-nota"
                  value="${a.puntaje_desarrollo}" data-id="${id}"
                  ${lock ? 'disabled title="PDF enviado: la nota esta bloqueada"' : ''}
                  aria-label="Puntaje desarrollo de ${esc(a.nombre)}" />`
@@ -462,6 +462,33 @@
       selMateria.addEventListener('change', () => (materiaSel.value = selMateria.value));
     }
 
+    /* ---------- Sumatoria de puntos (previsualizacion) ---------- */
+    const puntosInput = $('#puntos');
+    const resumenSuma = $('#resumenSuma');
+    const totalLista = $('#totalPuntos');
+
+    const redondear = (n) => Math.round(n * 100) / 100;
+    const sumaLista = () =>
+      $$('.item-pregunta').reduce((a, el) => a + (Number(el.dataset.puntos) || 0), 0);
+
+    function actualizarSuma() {
+      const base = sumaLista();
+      if (totalLista) totalLista.textContent = redondear(base);
+      if (!resumenSuma || !puntosInput) return;
+
+      const m = /\/admin\/preguntas\/(\d+)\/editar$/.exec(formPregunta.action);
+      const item = m ? document.querySelector(`.item-pregunta[data-id="${m[1]}"]`) : null;
+      const previo = item ? Number(item.dataset.puntos) || 0 : 0;
+      const nuevo = Number(String(puntosInput.value).replace(',', '.')) || 0;
+      const total = redondear(base - previo + nuevo);
+      resumenSuma.textContent = `Sumatoria del examen con esta pregunta: ${total} pts (sin ella: ${redondear(
+        base - previo
+      )} pts).`;
+    }
+
+    if (puntosInput) puntosInput.addEventListener('input', actualizarSuma);
+    actualizarSuma();
+
     if (btnCancelarP) {
       btnCancelarP.addEventListener('click', () => {
         formPregunta.reset();
@@ -469,6 +496,7 @@
         titulo.textContent = 'Nueva pregunta';
         btnCancelarP.hidden = true;
         syncTipo();
+        actualizarSuma();
       });
     }
 
@@ -489,6 +517,7 @@
         titulo.textContent = 'Editar pregunta #' + item.dataset.id;
         btnCancelarP.hidden = false;
         syncTipo();
+        actualizarSuma();
         formPregunta.scrollIntoView({ behavior: 'smooth', block: 'start' });
         $('#texto').focus();
       });

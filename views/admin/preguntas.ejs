@@ -65,8 +65,9 @@
               </select>
             </div>
             <div>
-              <label for="puntos">Puntos</label>
-              <input type="number" id="puntos" name="puntos" min="0" step="1" value="3" required />
+              <label for="puntos">Puntos (admite decimales)</label>
+              <input type="number" id="puntos" name="puntos" min="0" step="0.01" value="3" required />
+              <p class="muted" id="resumenSuma"></p>
             </div>
           </div>
 
@@ -103,12 +104,17 @@
           </div>
         </div>
 
+        <p class="muted sumatoria-puntos">
+          Sumatoria de puntos: <b id="totalPuntos"><%= totalPuntos %></b> pts
+          en <%= preguntas.length %> pregunta(s).
+        </p>
+
         <% if (preguntas.length === 0) { %>
           <p class="muted">No hay preguntas para el filtro seleccionado. Crea la primera con el formulario.</p>
         <% } else { %>
           <ul class="lista-preguntas">
             <% preguntas.forEach(function(p) { %>
-              <li class="item-pregunta" data-id="<%= p.id %>" data-materia="<%= p.materia_id || '' %>">
+              <li class="item-pregunta" data-id="<%= p.id %>" data-materia="<%= p.materia_id || '' %>" data-puntos="<%= p.puntos %>">
                 <div class="ip-head">
                   <span class="badge <%= p.tipo === 'choice' ? 'ok' : 'info' %>"><%= p.tipo %></span>
                   <% if (p.materia_nombre) { %>
@@ -162,8 +168,8 @@
                       </select>
                     </div>
                     <div>
-                      <label>Puntos</label>
-                      <input type="number" name="puntos" min="0" step="1" value="<%= p.puntos %>" required />
+                      <label>Puntos (admite decimales)</label>
+                      <input type="number" name="puntos" min="0" step="0.01" value="<%= p.puntos %>" required />
                     </div>
                   </div>
                   <div class="editar-choice" <%= p.tipo === 'choice' ? '' : 'hidden' %>>
