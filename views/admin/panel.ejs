@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Admin - Panel de control</title>
+  <link rel="stylesheet" href="/css/styles.css" />
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+</head>
+<body class="page-admin">
+
+  <header class="admin-topbar">
+    <div class="at-left">
+      <span class="logo-mini">MY</span>
+      <div>
+        <b>Panel de examenes</b>
+        <span class="muted">Servidor: <%= hoy %></span>
+      </div>
+    </div>
+    <nav class="at-nav">
+      <a href="/admin/panel" class="btn btn-ghost activo">Panel</a>
+      <a href="/admin/alumnos" class="btn btn-ghost">Alumnos</a>
+      <a href="/admin/grupos" class="btn btn-ghost">Grupos</a>
+      <a href="/admin/instituciones" class="btn btn-ghost">Instituciones</a>
+      <a href="/admin/preguntas" class="btn btn-ghost">Preguntas</a>
+      <form method="POST" action="/admin/logout" style="display:inline">
+        <button type="submit" class="btn btn-ghost">Salir</button>
+      </form>
+    </nav>
+  </header>
+
+  <main class="admin-main">
+    <section class="resumen">
+      <div class="stat"><b id="statTotal"><%= alumnos.length %></b><span>Alumnos</span></div>
+      <div class="stat"><b id="statEntregados">0</b><span>Entregados</span></div>
+      <div class="stat"><b id="statExpulsados">0</b><span>Expulsados</span></div>
+    </section>
+
+    <section class="card-tabla">
+      <div class="tabla-titulo">
+        <h1>Tiempo real</h1>
+        <div class="filtros">
+          <select id="filtroInstitucion" aria-label="Filtrar por institucion">
+            <option value="">Todas las instituciones</option>
+            <% instituciones.forEach(function(i) { %>
+              <option value="<%= i.id %>"><%= i.nombre %></option>
+            <% }) %>
+          </select>
+          <select id="filtroMateria" aria-label="Filtrar por materia">
+            <option value="">Todas las materias</option>
+            <% materias.forEach(function(m) { %>
+              <option value="<%= m.id %>" data-institucion="<%= m.institucion_id %>"><%= m.nombre %></option>
+            <% }) %>
+          </select>
+          <span class="pill-live"><span class="live-dot"></span> actualizando</span>
+        </div>
+      </div>
+
+      <div class="scroll-tabla">
+        <table class="tabla" id="tablaAlumnos">
+          <thead>
+            <tr>
+              <th>Documento</th>
+              <th>Nombre</th>
+              <th>Institucion</th>
+              <th>Materia</th>
+              <th>Grupo</th>
+              <th>Entrego</th>
+              <th>Fecha</th>
+              <th>Estado</th>
+              <th>Avisos</th>
+              <th>Choice</th>
+              <th>Desarrollo</th>
+              <th>Total</th>
+              <th>Acciones</th>
+            </tr>
+          </thead>
+          <tbody>
+            <% function fechaCorta(ts) {
+                 var m = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/.exec(String(ts || ''));
+                 return m ? m[3] + '/' + m[2] + '/' + m[1] + ' - ' + m[4] + ':' + m[5] : '—';
+               }
+               alumnos.forEach(function(a) { %>
+              <tr data-documento="<%= a.documento %>"
+                  data-institucion="<%= a.institucion_id || '' %>"
+                  data-materia="<%= a.materia_id || '' %>"
+                  data-estado="<%= a.estado || '' %>"
+                  class="<%= a.respuesta_id ? 'fila-entregada' : '' %>">
+                <td><code><%= a.documento %></code></td>
+                <td><%= a.nombre %></td>
+                <td><%= a.institucion_nombre || '—' %></td>
+                <td><%= a.materia_nombre || '—' %></td>
+                <td><span class="badge grupo-<%= a.grupo_dia %>"><%= a.grupo_nombre || '—' %></span></td>
+                <td class="c-entrego"><%= a.respuesta_id ? 'Si' : 'No' %></td>
+                <td class="c-ts"><%= fechaCorta(a.timestamp_entrega) %></td>
+                <td class="c-estado">
+                  <% if (a.estado === 'entregado') { %><span class="badge ok" title="Entregado">✓</span>
+                  <% } else if (a.estado === 'expulsado') { %><span class="badge err">expulsado</span>
+                  <% } else { %><span class="badge muted" title="No entregado">X</span><% } %>
+                </td>
+                <td class="c-avisos"><%= a.respuesta_id ? a.abandonos_count : '—' %></td>
+                <td class="c-choice"><%= a.respuesta_id ? a.puntaje_choice : '—' %></td>
+                <td class="c-desarrollo">
+                  <% if (a.respuesta_id) { %>
+                    <input
+                      type="number"
+                      min="0"
+                      step="1"
+                      class="input-nota"
+                      value="<%= a.puntaje_desarrollo %>"
+                      data-id="<%= a.respuesta_id %>"
+                      <%= a.pdf_enviado ? 'disabled title="PDF enviado: la nota esta bloqueada"' : '' %>
+                      aria-label="Puntaje desarrollo de <%= a.nombre %>"
+                    />
+                  <% } else { %>—<% } %>
+                </td>
+                <td class="c-total"><b><%= a.respuesta_id ? a.puntaje_total_obtenido : '—' %></b></td>
+                <td class="c-acciones">
+                  <% if (a.respuesta_id) { %>
+                    <a class="btn btn-sm btn-primary" href="/admin/pdf/<%= a.respuesta_id %>" title="Descargar PDF">PDF</a>
+                    <a class="btn btn-sm btn-ghost" href="/admin/preview/<%= a.respuesta_id %>" target="_blank" title="Ver respuestas">Ver</a>
+                    <button type="button" class="btn btn-sm btn-ghost btn-correccion <%= a.devoluciones ? 'tiene-dev' : '' %>" data-id="<%= a.respuesta_id %>">Corrección</button>
+                    <button type="button" class="btn btn-sm btn-ghost btn-encabezado" data-id="<%= a.respuesta_id %>">Encabezado</button>
+                    <button type="button" class="btn btn-sm btn-guardar" data-id="<%= a.respuesta_id %>" hidden>Guardar</button>
+                  <% } else { %><span class="muted">sin entrega</span><% } %>
+                </td>
+              </tr>
+            <% }) %>
+          </tbody>
+        </table>
+      </div>
+      <p class="muted pie-tabla">
+        Carga el puntaje del desarrollo (0 a los puntos de esas preguntas) y pulsa <b>Guardar</b>:
+        recalcula el total, genera el PDF y lo envia por Gmail. Una vez enviado, la nota queda bloqueada.
+      </p>
+    </section>
+  </main>
+
+  <div class="toast" id="toast" hidden></div>
+
+  <!-- Modal de devoluciones / correcciones -->
+  <div class="modal-overlay" id="modalCorreccion" hidden>
+    <div class="modal modal-correccion" role="dialog" aria-modal="true" aria-labelledby="corrTitulo">
+      <h2 id="corrTitulo">Devoluciones y correcciones</h2>
+      <p id="corrSubtitulo" class="muted"></p>
+      <textarea
+        id="corrTexto"
+        class="textarea-correccion"
+        maxlength="5000"
+        rows="8"
+        placeholder="Escribe las devoluciones y correcciones del examen..."
+      ></textarea>
+      <div class="corr-acciones">
+        <button type="button" class="btn btn-ghost" id="btnCancelarCorr">Cancelar</button>
+        <button type="button" class="btn btn-primary" id="btnGuardarCorr">Guardar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal de encabezado editable del PDF -->
+  <div class="modal-overlay" id="modalEncabezado" hidden>
+    <div class="modal modal-correccion" role="dialog" aria-modal="true" aria-labelledby="encTitulo">
+      <h2 id="encTitulo">Encabezado del PDF</h2>
+      <p id="encSubtitulo" class="muted"></p>
+      <label class="lbl-enc" for="encTituloPdf">Titulo</label>
+      <input type="text" id="encTituloPdf" class="input-enc" maxlength="200"
+             placeholder="Titulo del PDF (opcional)" />
+      <label class="lbl-enc" for="encTexto">Texto de encabezado</label>
+      <textarea
+        id="encTexto"
+        class="textarea-correccion"
+        maxlength="2000"
+        rows="6"
+        placeholder="Texto libre que aparecera debajo del titulo en el PDF (opcional)..."
+      ></textarea>
+      <div class="corr-acciones">
+        <button type="button" class="btn btn-ghost" id="btnCancelarEnc">Cancelar</button>
+        <button type="button" class="btn btn-primary" id="btnGuardarEnc">Guardar</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/js/admin.js"></script>
+</body>
+</html>

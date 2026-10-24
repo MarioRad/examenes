@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Admin - Instituciones y materias</title>
+  <link rel="stylesheet" href="/css/styles.css" />
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+</head>
+<body class="page-admin">
+
+  <header class="admin-topbar">
+    <div class="at-left">
+      <span class="logo-mini">A</span>
+      <div>
+        <b>Panel de examenes</b>
+        <span class="muted">Instituciones y materias</span>
+      </div>
+    </div>
+    <nav class="at-nav">
+      <a href="/admin/panel" class="btn btn-ghost">Panel</a>
+      <a href="/admin/alumnos" class="btn btn-ghost">Alumnos</a>
+      <a href="/admin/instituciones" class="btn btn-ghost activo">Instituciones</a>
+      <a href="/admin/preguntas" class="btn btn-ghost">Preguntas</a>
+      <form method="POST" action="/admin/logout" style="display:inline">
+        <button type="submit" class="btn btn-ghost">Salir</button>
+      </form>
+    </nav>
+  </header>
+
+  <main class="admin-main">
+    <% if (ok) { %><div class="alert alert-ok"><%= ok %></div><% } %>
+    <% if (error) { %><div class="alert alert-error"><%= error %></div><% } %>
+
+    <div class="admin-grid">
+
+      <!-- Instituciones -->
+      <section class="card-form">
+        <h2>Instituciones</h2>
+
+        <form method="POST" action="/admin/instituciones">
+          <label for="instNombre">Nueva institucion</label>
+          <div class="fila-form">
+            <input type="text" id="instNombre" name="nombre" required placeholder="Ej: Instituto San Martin" />
+            <button type="submit" class="btn btn-primary">Crear</button>
+          </div>
+        </form>
+
+        <ul class="lista-preguntas" style="margin-top:16px">
+          <% instituciones.forEach(function(i) { %>
+            <li class="item-pregunta" data-id="<%= i.id %>">
+              <div class="ip-head">
+                <b><%= i.nombre %></b>
+                <span class="pill"><%= i.materias %> materia(s)</span>
+              </div>
+              <div class="ip-acciones">
+                <button type="button" class="btn btn-sm btn-ghost btn-editar">Editar</button>
+                <form method="POST" action="/admin/instituciones/<%= i.id %>/borrar" class="form-borrar">
+                  <button type="submit" class="btn btn-sm btn-danger">Borrar</button>
+                </form>
+              </div>
+              <form method="POST" action="/admin/instituciones/<%= i.id %>/editar" class="form-editar" hidden>
+                <label>Nombre</label>
+                <input type="text" name="nombre" value="<%= i.nombre %>" required />
+                <div class="acciones-form">
+                  <button type="submit" class="btn btn-sm btn-primary">Guardar</button>
+                  <button type="button" class="btn btn-sm btn-ghost btn-cancelar-edicion">Cancelar</button>
+                </div>
+              </form>
+            </li>
+          <% }) %>
+        </ul>
+      </section>
+
+      <!-- Materias -->
+      <section class="card-tabla">
+        <div class="tabla-titulo">
+          <h2>Materias</h2>
+          <span class="pill"><%= materias.length %></span>
+        </div>
+
+        <form method="POST" action="/admin/materias" class="card-form" style="padding:0; border:0; background:transparent; margin-bottom:16px">
+          <div class="dos-col">
+            <div>
+              <label for="matNombre">Nueva materia</label>
+              <input type="text" id="matNombre" name="nombre" required placeholder="Ej: Bases de Datos" />
+            </div>
+            <div>
+              <label for="matInst">Institucion</label>
+              <select id="matInst" name="institucion_id" required>
+                <option value="">-- elegir --</option>
+                <% instituciones.forEach(function(i) { %>
+                  <option value="<%= i.id %>"><%= i.nombre %></option>
+                <% }) %>
+              </select>
+            </div>
+          </div>
+          <div class="acciones-form">
+            <button type="submit" class="btn btn-primary">Crear materia</button>
+          </div>
+        </form>
+
+        <% if (materias.length === 0) { %>
+          <p class="muted">Todavia no hay materias. Crea una institucion primero.</p>
+        <% } else { %>
+          <div class="scroll-tabla">
+            <table class="tabla">
+              <thead>
+                <tr>
+                  <th>Materia</th>
+                  <th>Institucion</th>
+                  <th>Alumnos</th>
+                  <th>Preguntas</th>
+                  <th>Acciones</th>
+                </tr>
+              </thead>
+              <tbody>
+                <% materias.forEach(function(m) { %>
+                  <tr data-id="<%= m.id %>">
+                    <td><b><%= m.nombre %></b></td>
+                    <td><%= m.institucion_nombre || '—' %></td>
+                    <td><%= m.alumnos %></td>
+                    <td><%= m.preguntas %></td>
+                    <td class="c-acciones">
+                      <button type="button" class="btn btn-sm btn-ghost btn-editar">Editar</button>
+                      <form method="POST" action="/admin/materias/<%= m.id %>/borrar" class="form-borrar" style="display:inline">
+                        <button type="submit" class="btn btn-sm btn-danger">Borrar</button>
+                      </form>
+                    </td>
+                  </tr>
+                  <tr class="fila-edicion" hidden>
+                    <td colspan="5">
+                      <form method="POST" action="/admin/materias/<%= m.id %>/editar" class="form-editar" style="margin:0; border:0; padding:0">
+                        <div class="fila-form">
+                          <input type="text" name="nombre" value="<%= m.nombre %>" required aria-label="Nombre de materia" />
+                          <button type="submit" class="btn btn-sm btn-primary">Guardar</button>
+                          <button type="button" class="btn btn-sm btn-ghost btn-cancelar-edicion">Cancelar</button>
+                        </div>
+                      </form>
+                    </td>
+                  </tr>
+                <% }) %>
+              </tbody>
+            </table>
+          </div>
+        <% } %>
+      </section>
+    </div>
+  </main>
+
+  <div class="toast" id="toast" hidden></div>
+
+  <script src="/js/admin.js"></script>
+</body>
+</html>

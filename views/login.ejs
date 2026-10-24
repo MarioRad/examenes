@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Acceso al Examen</title>
+  <link rel="stylesheet" href="/css/styles.css" />
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+</head>
+<body class="page-login">
+  <main class="login-card" role="main">
+    <div class="login-logo" aria-hidden="true">E</div>
+    <h1>Sistema de Examenes</h1>
+    <p class="sub">Ingresa tu <strong>Numero de Documento</strong> para comenzar.</p>
+
+    <% if (error) { %>
+      <div class="alert alert-error" role="alert"><%= error %></div>
+    <% } %>
+
+    <form method="POST" action="/login" autocomplete="off" class="form-login">
+      <label for="documento">Numero de Documento</label>
+      <input
+        type="text"
+        inputmode="numeric"
+        id="documento"
+        name="documento"
+        value="<%= documento %>"
+        placeholder="Ej: 28456789"
+        required
+        autofocus
+        spellcheck="false"
+        class="input-lg"
+      />
+      <button type="submit" class="btn btn-primary btn-block">Entrar al examen</button>
+    </form>
+
+    <ul class="horarios">
+      <% if (typeof grupos !== 'undefined' && grupos.length) { %>
+        <% grupos.forEach(function(g) { %>
+          <li><span class="dot <%= g.dia === 6 ? 'dot-sab' : (g.dia === 1 ? 'dot-lun' : 'dot-gen') %>"></span>
+            Grupo <b><%= g.nombre.toLowerCase() %></b>: <%= ['domingos','lunes','martes','miercoles','jueves','viernes','sabados'][g.dia] %>
+            <%= g.hora_desde %> a <%= g.hora_hasta %> hs</li>
+        <% }) %>
+      <% } else { %>
+        <li>Consultá el dia y horario de tu examen con tu profesor.</li>
+      <% } %>
+    </ul>
+  </main>
+</body>
+</html>

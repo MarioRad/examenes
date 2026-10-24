@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Examen en curso</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/quill@2.0.3/dist/quill.snow.css" />
+  <link rel="stylesheet" href="/css/styles.css" />
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+</head>
+<body class="page-examen">
+
+  <header class="examen-topbar">
+    <div class="topbar-alumno">
+      <div class="avatar"><%= alumno.nombre.charAt(0).toUpperCase() %></div>
+      <div class="quienes">
+        <b><%= alumno.nombre %></b>
+        <span>
+          <%= alumno.documento %> &middot; grupo <%= alumno.grupo_nombre || alumno.grupo_dia %>
+          <% if (alumno.materia_nombre) { %> &middot; <%= alumno.materia_nombre %><% } %>
+          <% if (alumno.institucion_nombre) { %> &middot; <%= alumno.institucion_nombre %><% } %>
+        </span>
+      </div>
+    </div>
+
+    <div class="temporizador" id="temporizador" aria-live="polite">
+      <span class="tt-label">Tiempo restante</span>
+      <span class="tt-valor" id="reloj">--:--</span>
+    </div>
+
+    <div class="topbar-avisos">
+      <span class="chip-avisos" id="chipAvisos" title="Cambios de pestana registrados">Avisos: 0/3</span>
+    </div>
+  </header>
+
+  <main class="examen-main" id="examenMain">
+    <div class="intro-card">
+      <h1>Examen</h1>
+      <p>
+        Tenes <b>60 minutos</b>. Respondé las preguntas de opcion multiple tildando las opciones
+        y escribi las de desarrollo en el editor (podes pegar imagenes).
+        <br />
+        <b>Importante:</b> cambiar de pestana o minimizar la ventana cuenta como abandono.
+        Al <b>3er aviso</b> el examen se envia automaticamente como <b>expulsado</b>.
+      </p>
+      <p class="muted">Ventana de tu grupo: <%= ventana %></p>
+    </div>
+
+    <form id="formExamen" novalidate>
+      <% preguntas.forEach(function(p, i) { %>
+        <section class="card-pregunta" data-id="<%= p.id %>" data-tipo="<%= p.tipo %>">
+          <header class="cp-header">
+            <span class="cp-num"><%= i + 1 %></span>
+            <div class="cp-texto"><%- p.texto %></div>
+            <span class="cp-puntos"><%= p.puntos %> pts</span>
+          </header>
+
+          <% if (p.tipo === 'choice') {
+               var ops = [];
+               try { ops = JSON.parse(p.opciones_json || '[]'); } catch (e) { ops = []; }
+               var multi = false;
+               try { multi = JSON.parse(p.respuesta_correcta || '[]').length > 1; } catch (e) { multi = false; }
+          %>
+            <div class="opciones" role="<%= multi ? 'group' : 'radiogroup' %>">
+              <% ops.forEach(function(op, idx) { %>
+                <label class="opcion">
+                  <input
+                    type="<%= multi ? 'checkbox' : 'radio' %>"
+                    name="preg_<%= p.id %>"
+                    value="<%= idx %>"
+                    data-pregunta="<%= p.id %>"
+                  />
+                  <span class="opcion-texto"><%= op %></span>
+                </label>
+              <% }) %>
+            </div>
+          <% } else { %>
+            <div class="editor" id="editor_<%= p.id %>"></div>
+          <% } %>
+        </section>
+      <% }) %>
+
+      <% if (preguntas.length === 0) { %>
+        <div class="card-pregunta"><p>No hay preguntas cargadas. Consulta con tu profesor.</p></div>
+      <% } %>
+
+      <div class="acciones-finales">
+        <button type="button" class="btn btn-danger btn-block" id="btnEnviar">
+          Entregar examen
+        </button>
+      </div>
+    </form>
+  </main>
+
+  <!-- Modal de avisos (1 y 2 aviso) -->
+  <div class="modal-overlay" id="modalAviso" hidden>
+    <div class="modal" role="alertdialog" aria-modal="true" aria-labelledby="modalTitulo">
+      <div class="modal-icono" aria-hidden="true">!</div>
+      <h2 id="modalTitulo">Advertencia <span id="modalNro">1</span> de 3</h2>
+      <p id="modalTexto">
+        Cambiaste de pestana o minimizaste el navegador.<br />
+        Esta accion queda <b>registrada</b>. Al 3er aviso el examen se entrega como expulsado.
+      </p>
+      <button type="button" class="btn btn-primary" id="btnEntendido">Entendido, continuar</button>
+    </div>
+  </div>
+
+  <!-- Bloqueo definitivo (3er aviso / expulsion) -->
+  <div class="modal-overlay overlay-bloqueo" id="modalBloqueo" hidden>
+    <div class="modal modal-bloqueo" role="alertdialog" aria-modal="true">
+      <div class="modal-icono rojo" aria-hidden="true">&#10006;</div>
+      <h2>Examen bloqueado</h2>
+      <p>
+        Detectamos <b>3 abandonos</b> de pestana.<br />
+        Tu examen se esta entregando automaticamente con estado <b>EXPULSADO</b>.
+      </p>
+      <div class="loader" aria-hidden="true"></div>
+      <p id="bloqueoEstado">Enviando respuestas...</p>
+    </div>
+  </div>
+
+  <!-- Confirmacion final -->
+  <div class="modal-overlay" id="modalListo" hidden>
+    <div class="modal modal-listo" role="dialog" aria-modal="true">
+      <div class="modal-icono verde" aria-hidden="true">&#10003;</div>
+      <h2 id="listoTitulo">Se entregó tu exámen</h2>
+      <p id="listoChoice"></p>
+      <p id="listoDesarrollo" hidden>
+        Las respuestas que tienen desarrollo serán corregidas por el profesor y se asignará la nota correspondiente.
+      </p>
+      <p id="listoCorreo" hidden></p>
+      <button type="button" class="btn btn-primary" id="btnCerrarListo">OK</button>
+    </div>
+  </div>
+
+  <script>
+    window.__EXAMEN__ = {
+      restanteMs: <%= restanteMs %>,
+      serverNow: <%= serverNow %>,
+      preguntas: <%- JSON.stringify(preguntas.map(function(p){ return {id:p.id, tipo:p.tipo}; })) %>
+    };
+  </script>
+  <script src="https://cdn.jsdelivr.net/npm/quill@2.0.3/dist/quill.js"></script>
+  <script src="/js/examen.js"></script>
+</body>
+</html>

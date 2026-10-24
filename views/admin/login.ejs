@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Admin - Acceso</title>
+  <link rel="stylesheet" href="/css/styles.css" />
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+</head>
+<body class="page-login">
+  <main class="login-card">
+    <div class="login-logo" aria-hidden="true">A</div>
+    <h1>Panel de Administracion</h1>
+    <p class="sub">Acceso restringido al profesor.</p>
+
+    <% if (error) { %>
+      <div class="alert alert-error" role="alert"><%= error %></div>
+    <% } %>
+
+    <form method="POST" action="/admin/login" class="form-login">
+      <label for="password">Contraseña</label>
+      <input type="password" id="password" name="password" required autofocus class="input-lg" />
+      <button type="submit" class="btn btn-primary btn-block">Ingresar</button>
+    </form>
+  </main>
+</body>
+</html>

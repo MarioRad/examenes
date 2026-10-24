@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Admin - Alumnos</title>
+  <link rel="stylesheet" href="/css/styles.css" />
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+</head>
+<body class="page-admin">
+
+  <header class="admin-topbar">
+    <div class="at-left">
+      <span class="logo-mini">A</span>
+      <div>
+        <b>Panel de examenes</b>
+        <span class="muted">Gestión de alumnos</span>
+      </div>
+    </div>
+    <nav class="at-nav">
+      <a href="/admin/panel" class="btn btn-ghost">Panel</a>
+      <a href="/admin/alumnos" class="btn btn-ghost activo">Alumnos</a>
+      <a href="/admin/grupos" class="btn btn-ghost">Grupos</a>
+      <a href="/admin/instituciones" class="btn btn-ghost">Instituciones</a>
+      <a href="/admin/preguntas" class="btn btn-ghost">Preguntas</a>
+      <form method="POST" action="/admin/logout" style="display:inline">
+        <button type="submit" class="btn btn-ghost">Salir</button>
+      </form>
+    </nav>
+  </header>
+
+  <main class="admin-main">
+    <% if (ok) { %><div class="alert alert-ok"><%= ok %></div><% } %>
+    <% if (error) { %><div class="alert alert-error"><%= error %></div><% } %>
+
+    <div class="admin-grid">
+
+      <!-- Crear / editar alumno -->
+      <section class="card-form">
+        <h2 id="tituloForm">Nuevo alumno</h2>
+
+        <form method="POST" action="/admin/alumnos" id="formAlumno">
+          <label for="documento">Número de documento</label>
+          <input type="text" id="documento" name="documento" required
+                 inputmode="numeric" placeholder="Ej: 28456789" maxlength="20" />
+
+          <label for="nombre">Nombre completo</label>
+          <input type="text" id="nombre" name="nombre" required placeholder="Ej: Lucia Fernandez" />
+
+          <label for="email">Email</label>
+          <input type="email" id="email" name="email" required placeholder="alumno@correo.com" />
+
+          <div class="dos-col">
+            <div>
+              <label for="grupo_id">Grupo (dia de examen)</label>
+              <select id="grupo_id" name="grupo_id" required>
+                <option value="">-- elegir grupo --</option>
+                <% grupos.forEach(function(g) { %>
+                  <option value="<%= g.id %>"><%= g.nombre %> (<%= g.hora_desde %> a <%= g.hora_hasta %>)</option>
+                <% }) %>
+              </select>
+            </div>
+            <div>
+              <label for="institucion_id">Institución</label>
+              <select id="institucion_id" name="institucion_id" data-cascada="1" required>
+                <option value="">-- elegir --</option>
+                <% instituciones.forEach(function(i) { %>
+                  <option value="<%= i.id %>"><%= i.nombre %></option>
+                <% }) %>
+              </select>
+            </div>
+          </div>
+
+          <label for="materia_id">Materia</label>
+          <select id="materia_id" name="materia_id" required>
+            <option value="">-- elige institución primero --</option>
+          </select>
+
+          <div class="acciones-form">
+            <button type="submit" class="btn btn-primary" id="btnGuardarAlumno">Crear alumno</button>
+            <button type="button" class="btn btn-ghost" id="btnCancelar" hidden>Cancelar</button>
+          </div>
+        </form>
+      </section>
+
+      <!-- Listado -->
+      <section class="card-tabla">
+        <div class="tabla-titulo">
+          <h2>Alumnos cargados</h2>
+          <span class="pill"><%= alumnos.length %></span>
+        </div>
+
+        <div class="filtros" style="margin-bottom:12px">
+          <select id="filtroInstitucion" aria-label="Filtrar por institucion">
+            <option value="">Todas las instituciones</option>
+            <% instituciones.forEach(function(i) { %>
+              <option value="<%= i.id %>"><%= i.nombre %></option>
+            <% }) %>
+          </select>
+          <select id="filtroMateria" aria-label="Filtrar por materia">
+            <option value="">Todas las materias</option>
+            <% materias.forEach(function(m) { %>
+              <option value="<%= m.id %>" data-institucion="<%= m.institucion_id %>"><%= m.nombre %></option>
+            <% }) %>
+          </select>
+        </div>
+
+        <% if (alumnos.length === 0) { %>
+          <p class="muted">No hay alumnos. Crea el primero con el formulario.</p>
+        <% } else { %>
+          <div class="scroll-tabla">
+            <table class="tabla" id="tablaAlumnos">
+              <thead>
+                <tr>
+                  <th>Documento</th>
+                  <th>Nombre</th>
+                  <th>Email</th>
+                  <th>Grupo</th>
+                  <th>Materia</th>
+                  <th>Institucion</th>
+                  <th>Acciones</th>
+                </tr>
+              </thead>
+              <tbody>
+                <% alumnos.forEach(function(a) { %>
+                  <tr data-documento="<%= a.documento %>"
+                      data-grupo="<%= a.grupo_id || '' %>"
+                      data-institucion="<%= (materias.find(function(m){ return m.id === a.materia_id; }) || {}).institucion_id || '' %>"
+                      data-materia="<%= a.materia_id || '' %>">
+                    <td><code><%= a.documento %></code></td>
+                    <td><%= a.nombre %></td>
+                    <td class="c-email"><%= a.email %></td>
+                    <td><span class="badge grupo-<%= a.grupo_dia %>"><%= a.grupo_nombre || '—' %></span></td>
+                    <td><%= a.materia_nombre || '—' %></td>
+                    <td><%= a.institucion_nombre || '—' %></td>
+                    <td class="c-acciones">
+                      <button type="button" class="btn btn-sm btn-ghost btn-editar">Editar</button>
+                      <form method="POST" action="/admin/alumnos/<%= a.documento %>/borrar" class="form-borrar" style="display:inline">
+                        <button type="submit" class="btn btn-sm btn-danger">Borrar</button>
+                      </form>
+                    </td>
+                  </tr>
+                <% }) %>
+              </tbody>
+            </table>
+          </div>
+          <p class="muted pie-tabla">
+            El borrado esta bloqueado si el alumno ya entrego su examen.
+          </p>
+        <% } %>
+      </section>
+    </div>
+  </main>
+
+  <div class="toast" id="toast" hidden></div>
+
+  <script>
+    window.__MATERIAS__ = <%- JSON.stringify(materias.map(function(m) {
+      return { id: m.id, nombre: m.nombre, institucion_id: m.institucion_id };
+    })) %>;
+  </script>
+  <script src="/js/admin.js"></script>
+</body>
+</html>

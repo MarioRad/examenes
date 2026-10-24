@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Admin - Preguntas</title>
+  <link rel="stylesheet" href="/css/styles.css" />
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+</head>
+<body class="page-admin">
+
+  <header class="admin-topbar">
+    <div class="at-left">
+      <span class="logo-mini">A</span>
+      <div>
+        <b>Panel de examenes</b>
+        <span class="muted">Carga de preguntas</span>
+      </div>
+    </div>
+    <nav class="at-nav">
+      <a href="/admin/panel" class="btn btn-ghost">Panel</a>
+      <a href="/admin/alumnos" class="btn btn-ghost">Alumnos</a>
+      <a href="/admin/grupos" class="btn btn-ghost">Grupos</a>
+      <a href="/admin/instituciones" class="btn btn-ghost">Instituciones</a>
+      <a href="/admin/preguntas" class="btn btn-ghost activo">Preguntas</a>
+      <form method="POST" action="/admin/logout" style="display:inline">
+        <button type="submit" class="btn btn-ghost">Salir</button>
+      </form>
+    </nav>
+  </header>
+
+  <main class="admin-main">
+
+    <% if (ok) { %><div class="alert alert-ok"><%= ok %></div><% } %>
+    <% if (error) { %><div class="alert alert-error"><%= error %></div><% } %>
+
+    <div class="admin-grid">
+
+      <!-- CREAR / EDITAR -->
+      <section class="card-form">
+        <h2 id="tituloForm">Nueva pregunta</h2>
+
+        <form method="POST" action="/admin/preguntas" id="formPregunta">
+          <label for="materia_id">Materia del examen</label>
+          <select id="materia_id" name="materia_id" required>
+            <option value="">-- elegir materia --</option>
+            <% materias.forEach(function(m) { %>
+              <option value="<%= m.id %>"
+                <%= materiaSel === m.id ? 'selected' : '' %>>
+                <%= (m.institucion_nombre ? m.institucion_nombre + ' / ' : '') + m.nombre %>
+              </option>
+            <% }) %>
+          </select>
+          <input type="hidden" name="materia_sel" id="materiaSel" value="<%= materiaSel || '' %>" />
+
+          <label for="texto">Enunciado</label>
+          <textarea id="texto" name="texto" rows="4" required placeholder="Escribe la pregunta..."></textarea>
+
+          <div class="dos-col">
+            <div>
+              <label for="tipo">Tipo</label>
+              <select id="tipo" name="tipo" required>
+                <option value="choice">Choice (opcion multiple)</option>
+                <option value="desarrollo" selected>Desarrollo</option>
+              </select>
+            </div>
+            <div>
+              <label for="puntos">Puntos</label>
+              <input type="number" id="puntos" name="puntos" min="0" step="1" value="3" required />
+            </div>
+          </div>
+
+          <div id="bloqueChoice" hidden>
+            <label for="opciones">Opciones (una por linea)</label>
+            <textarea id="opciones" name="opciones" rows="4" placeholder="Opcion A&#10;Opcion B&#10;Opcion C"></textarea>
+
+            <label for="correctas">Respuesta(s) correcta(s) &mdash; numeros 1-based separados por coma</label>
+            <input type="text" id="correctas" name="correctas" placeholder="Ej: 1,3" />
+            <p class="muted">Ejemplo: <code>1,3</code> significa que las opciones 1 y 3 son correctas (multirespuesta).</p>
+          </div>
+
+          <div class="acciones-form">
+            <button type="submit" class="btn btn-primary">Crear pregunta</button>
+            <button type="button" class="btn btn-ghost" id="btnCancelar" hidden>Cancelar</button>
+          </div>
+        </form>
+      </section>
+
+      <!-- LISTAR -->
+      <section class="card-tabla">
+        <div class="tabla-titulo">
+          <h2>Preguntas cargadas</h2>
+          <div class="filtros">
+            <select id="filtroMateria" aria-label="Filtrar por materia">
+              <option value="">Todas las materias</option>
+              <% materias.forEach(function(m) { %>
+                <option value="<%= m.id %>" <%= materiaSel === m.id ? 'selected' : '' %>>
+                  <%= (m.institucion_nombre ? m.institucion_nombre + ' / ' : '') + m.nombre %>
+                </option>
+              <% }) %>
+            </select>
+            <span class="pill"><%= preguntas.length %></span>
+          </div>
+        </div>
+
+        <% if (preguntas.length === 0) { %>
+          <p class="muted">No hay preguntas para el filtro seleccionado. Crea la primera con el formulario.</p>
+        <% } else { %>
+          <ul class="lista-preguntas">
+            <% preguntas.forEach(function(p) { %>
+              <li class="item-pregunta" data-id="<%= p.id %>" data-materia="<%= p.materia_id || '' %>">
+                <div class="ip-head">
+                  <span class="badge <%= p.tipo === 'choice' ? 'ok' : 'info' %>"><%= p.tipo %></span>
+                  <% if (p.materia_nombre) { %>
+                    <span class="badge muted"><%= p.materia_nombre %></span>
+                  <% } %>
+                  <span class="cp-puntos"><%= p.puntos %> pts</span>
+                </div>
+                <p class="ip-texto"><%= p.texto %></p>
+
+                <% if (p.tipo === 'choice') {
+                     var ops = []; var corr = [];
+                     try { ops = JSON.parse(p.opciones_json || '[]'); } catch (e) {}
+                     try { corr = JSON.parse(p.respuesta_correcta || '[]'); } catch (e) {}
+                %>
+                  <ul class="ip-opciones">
+                    <% ops.forEach(function(op, i) { %>
+                      <li class="<%= corr.indexOf(i) !== -1 ? 'correcta' : '' %>">
+                        <%= corr.indexOf(i) !== -1 ? '✔' : '•' %> <%= op %>
+                      </li>
+                    <% }) %>
+                  </ul>
+                <% } %>
+
+                <div class="ip-acciones">
+                  <button type="button" class="btn btn-sm btn-ghost btn-editar">Editar</button>
+                  <form method="POST" action="/admin/preguntas/<%= p.id %>/borrar" class="form-borrar">
+                    <input type="hidden" name="materia_sel" value="<%= materiaSel || '' %>" />
+                    <button type="submit" class="btn btn-sm btn-danger">Borrar</button>
+                  </form>
+                </div>
+
+                <!-- Formulario de edicion (oculto) -->
+                <form method="POST" action="/admin/preguntas/<%= p.id %>/editar" class="form-editar" hidden>
+                  <input type="hidden" name="materia_sel" value="<%= materiaSel || '' %>" />
+                  <label>Materia</label>
+                  <select name="materia_id" required>
+                    <% materias.forEach(function(m) { %>
+                      <option value="<%= m.id %>" <%= p.materia_id === m.id ? 'selected' : '' %>>
+                        <%= (m.institucion_nombre ? m.institucion_nombre + ' / ' : '') + m.nombre %>
+                      </option>
+                    <% }) %>
+                  </select>
+                  <label>Enunciado</label>
+                  <textarea name="texto" rows="3" required><%= p.texto %></textarea>
+                  <div class="dos-col">
+                    <div>
+                      <label>Tipo</label>
+                      <select name="tipo">
+                        <option value="choice" <%= p.tipo === 'choice' ? 'selected' : '' %>>Choice</option>
+                        <option value="desarrollo" <%= p.tipo === 'desarrollo' ? 'selected' : '' %>>Desarrollo</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label>Puntos</label>
+                      <input type="number" name="puntos" min="0" step="1" value="<%= p.puntos %>" required />
+                    </div>
+                  </div>
+                  <div class="editar-choice" <%= p.tipo === 'choice' ? '' : 'hidden' %>>
+                    <label>Opciones (una por linea)</label>
+                    <textarea name="opciones" rows="3"><%= p.opciones_json ? JSON.parse(p.opciones_json).join('\n') : '' %></textarea>
+                    <label>Correcta(s) 1-based</label>
+                    <input type="text" name="correctas"
+                      value="<%= p.respuesta_correcta ? JSON.parse(p.respuesta_correcta).map(function(n){ return n + 1; }).join(',') : '' %>" />
+                  </div>
+                  <div class="acciones-form">
+                    <button type="submit" class="btn btn-sm btn-primary">Guardar cambios</button>
+                    <button type="button" class="btn btn-sm btn-ghost btn-cancelar-edicion">Cancelar</button>
+                  </div>
+                </form>
+              </li>
+            <% }) %>
+          </ul>
+        <% } %>
+      </section>
+    </div>
+  </main>
+
+  <div class="toast" id="toast" hidden></div>
+
+  <script src="/js/admin.js"></script>
+</body>
+</html>
