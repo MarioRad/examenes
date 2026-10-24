@@ -13,7 +13,14 @@ const {
   borrarInstitucionEnCascada
 } = require('./lib/db');
 const { LibsqlStore } = require('./lib/session-store');
-const { validarHorario, ventanaDe } = require('./lib/horarios');
+const {
+  validarHorario,
+  ventanaDe,
+  ventanaExamen,
+  etiquetaVentana,
+  duracionExamenMs,
+  minutosHastaVentana
+} = require('./lib/horarios');
 const { evaluarChoice } = require('./lib/grading');
 const { generarPdf } = require('./lib/pdf');
 const { enviarPdf } = require('./lib/mailer');
@@ -21,7 +28,6 @@ const { enviarPdf } = require('./lib/mailer');
 const app = express();
 const PORT = process.env.PORT || 3000;
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'admin123';
-const DURACION_EXAMEN_MS = 60 * 60 * 1000;
 const GRACIA_ENTREGA_MS = 10 * 60 * 1000;
 
 app.set('view engine', 'ejs');
@@ -142,17 +148,33 @@ app.post('/login', async (req, res) => {
     });
   }
 
-  const horario = await validarHorario(alumno.grupo_id);
-  if (!horario.ok) {
-    return renderLogin(res, { error: horario.motivo, documento });
+  // Si la materia define fecha/hora de apertura y cierre del examen, esa ventana
+  // manda; si no, se mantiene el horario semanal del grupo.
+  const ventanaMateria = ventanaExamen(alumno, tsServidor());
+  if (ventanaMateria) {
+    if (!ventanaMateria.ok) {
+      return renderLogin(res, { error: ventanaMateria.motivo, documento });
+    }
+  } else {
+    const horario = await validarHorario(alumno.grupo_id);
+    if (!horario.ok) {
+      return renderLogin(res, { error: horario.motivo, documento });
+    }
   }
 
   const inicio = Date.now();
+  // Tiempo de resolucion propio del examen, recortado si la ventana cierra antes.
+  const minutosVentana = minutosHastaVentana(alumno, tsServidor());
+  const fin =
+    minutosVentana == null
+      ? inicio + duracionExamenMs(alumno)
+      : Math.min(inicio + duracionExamenMs(alumno), inicio + minutosVentana * 60000);
+
   req.session.regenerate((err) => {
     if (err) return res.status(500).send('Error de sesion.');
     req.session.alumno = { documento: alumno.documento, nombre: alumno.nombre };
     req.session.inicio = inicio;
-    req.session.fin = inicio + DURACION_EXAMEN_MS;
+    req.session.fin = fin;
     req.session.abandonos = 0;
     res.redirect('/examen');
   });
@@ -171,14 +193,15 @@ app.get('/examen', requiereAlumno, bloqueaSiYaEntrego, async (req, res) => {
   const preguntas = alumno ? await stmts.preguntasDeMateria.all(alumno.materia_id || 0) : [];
 
   const enRango = req.session.fin - Date.now();
-  const restante = Math.max(0, Math.min(DURACION_EXAMEN_MS, enRango));
+  const restante = Math.max(0, Math.min(duracionExamenMs(alumno), enRango));
 
+  const ventanaFechas = etiquetaVentana(alumno);
   res.render('examen', {
     alumno,
     preguntas,
     restanteMs: restante,
     serverNow: Date.now(),
-    ventana: await ventanaDe(alumno.grupo_id)
+    ventana: ventanaFechas || `del grupo ${await ventanaDe(alumno.grupo_id)}`
   });
 });
 
@@ -619,13 +642,64 @@ app.post('/admin/instituciones/:id/borrar', requiereAdmin, async (req, res) => {
   res.redirect('/admin/instituciones?ok=Institucion+borrada');
 });
 
+/** '01:30' / '1h30' / '90' -> minutos. Vacio = 60 por defecto. */
+function minutosDeDuracion(valor) {
+  const s = String(valor == null ? '' : valor).trim();
+  if (!s) return 60;
+  const hm = /^(\d{1,2})[:h](\d{1,2})$/.exec(s);
+  if (hm) return Number(hm[1]) * 60 + Number(hm[2]);
+  const n = Number(s.replace(',', '.'));
+  return Number.isFinite(n) ? Math.round(n) : null;
+}
+
+/** datetime-local ('2026-11-20T10:00') -> 'YYYY-MM-DD HH:MM'. undefined = invalido. */
+function normalizarFechaHora(valor) {
+  const s = String(valor == null ? '' : valor).trim();
+  if (!s) return null;
+  const m = /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})/.exec(s);
+  if (!m) return undefined;
+  return `${m[1]}-${m[2]}-${m[3]} ${m[4]}:${m[5]}`;
+}
+
+function leerMateriaForm(body) {
+  const nombre = String(body.nombre || '').trim();
+  if (!nombre) throw new Error('El nombre es obligatorio.');
+
+  const duracion = minutosDeDuracion(body.duracion);
+  if (duracion == null || duracion < 1 || duracion > 24 * 60) {
+    throw new Error('Duracion invalida: usa HH:MM (maximo 24:00).');
+  }
+
+  const desde = normalizarFechaHora(body.disponible_desde);
+  const hasta = normalizarFechaHora(body.disponible_hasta);
+  if (desde === undefined || hasta === undefined) throw new Error('Fecha y hora invalidas.');
+  if ((desde && !hasta) || (!desde && hasta)) {
+    throw new Error('Completa el inicio y el fin de la ventana del examen.');
+  }
+  if (desde && hasta && hasta <= desde) {
+    throw new Error('El fin de la ventana debe ser posterior al inicio.');
+  }
+
+  return {
+    nombre,
+    duracion_minutos: duracion,
+    disponible_desde: desde,
+    disponible_hasta: hasta
+  };
+}
+
 app.post('/admin/materias', requiereAdmin, async (req, res) => {
   try {
-    const nombre = String(req.body.nombre || '').trim();
+    const m = leerMateriaForm(req.body);
     const institucion_id = Number(req.body.institucion_id) || 0;
-    if (!nombre) throw new Error('El nombre es obligatorio.');
     if (!(await stmts.getInstitucion.get(institucion_id))) throw new Error('Elegi una institucion.');
-    await stmts.crearMateria.run(nombre, institucion_id);
+    await stmts.crearMateria.run(
+      m.nombre,
+      institucion_id,
+      m.duracion_minutos,
+      m.disponible_desde,
+      m.disponible_hasta
+    );
     res.redirect('/admin/instituciones?ok=Materia+creada');
   } catch (e) {
     res.redirect(`/admin/instituciones?error=${encodeURIComponent(e.message)}`);
@@ -634,9 +708,14 @@ app.post('/admin/materias', requiereAdmin, async (req, res) => {
 
 app.post('/admin/materias/:id/editar', requiereAdmin, async (req, res) => {
   try {
-    const nombre = String(req.body.nombre || '').trim();
-    if (!nombre) throw new Error('El nombre es obligatorio.');
-    await stmts.editarMateria.run(nombre, Number(req.params.id));
+    const m = leerMateriaForm(req.body);
+    await stmts.editarMateria.run(
+      m.nombre,
+      m.duracion_minutos,
+      m.disponible_desde,
+      m.disponible_hasta,
+      Number(req.params.id)
+    );
     res.redirect('/admin/instituciones?ok=Materia+actualizada');
   } catch (e) {
     res.redirect(`/admin/instituciones?error=${encodeURIComponent(e.message)}`);

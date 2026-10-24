@@ -118,6 +118,24 @@
               </select>
             </div>
           </div>
+          <div class="dos-col">
+            <div>
+              <label for="matDuracion">Tiempo de resolucion (HH:MM)</label>
+              <input type="text" id="matDuracion" name="duracion" value="01:00" placeholder="01:30" />
+            </div>
+            <div>
+              <label for="matDesde">Disponible desde</label>
+              <input type="datetime-local" id="matDesde" name="disponible_desde" />
+            </div>
+          </div>
+          <div>
+            <label for="matHasta">Disponible hasta</label>
+            <input type="datetime-local" id="matHasta" name="disponible_hasta" />
+          </div>
+          <p class="muted">
+            El alumno dispone del tiempo de resolucion desde que ingresa. Sin fechas, el acceso
+            se rige por el horario del grupo.
+          </p>
           <div class="acciones-form">
             <button type="submit" class="btn btn-primary">Crear materia</button>
           </div>
@@ -134,6 +152,7 @@
                   <th>Institucion</th>
                   <th>Alumnos</th>
                   <th>Preguntas</th>
+                  <th>Examen</th>
                   <th>Acciones</th>
                 </tr>
               </thead>
@@ -144,6 +163,19 @@
                     <td><%= m.institucion_nombre || '—' %></td>
                     <td><%= m.alumnos %></td>
                     <td><%= m.preguntas %></td>
+                    <td>
+                      <% var durMin = m.duracion_minutos || 60; %>
+                      <span class="badge muted">
+                        <%= String(Math.floor(durMin / 60)).padStart(2, '0') %>:<%= String(durMin % 60).padStart(2, '0') %> hs
+                      </span>
+                      <div class="muted">
+                        <% if (m.disponible_desde && m.disponible_hasta) { %>
+                          <%= m.disponible_desde %> &rarr; <%= m.disponible_hasta %>
+                        <% } else { %>
+                          Horario del grupo
+                        <% } %>
+                      </div>
+                    </td>
                     <td class="c-acciones">
                       <button type="button" class="btn btn-sm btn-ghost btn-editar">Editar</button>
                       <form
@@ -158,10 +190,30 @@
                     </td>
                   </tr>
                   <tr class="fila-edicion" hidden>
-                    <td colspan="5">
+                    <td colspan="6">
                       <form method="POST" action="/admin/materias/<%= m.id %>/editar" class="form-editar" style="margin:0; border:0; padding:0">
+                        <% var durEd = m.duracion_minutos || 60; %>
                         <div class="fila-form">
                           <input type="text" name="nombre" value="<%= m.nombre %>" required aria-label="Nombre de materia" />
+                          <input
+                            type="text"
+                            name="duracion"
+                            value="<%= String(Math.floor(durEd / 60)).padStart(2, '0') %>:<%= String(durEd % 60).padStart(2, '0') %>"
+                            aria-label="Duracion HH:MM"
+                            style="max-width:110px"
+                          />
+                          <input
+                            type="datetime-local"
+                            name="disponible_desde"
+                            value="<%= (m.disponible_desde || '').replace(' ', 'T') %>"
+                            aria-label="Disponible desde"
+                          />
+                          <input
+                            type="datetime-local"
+                            name="disponible_hasta"
+                            value="<%= (m.disponible_hasta || '').replace(' ', 'T') %>"
+                            aria-label="Disponible hasta"
+                          />
                           <button type="submit" class="btn btn-sm btn-primary">Guardar</button>
                           <button type="button" class="btn btn-sm btn-ghost btn-cancelar-edicion">Cancelar</button>
                         </div>
