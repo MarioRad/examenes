@@ -6,7 +6,8 @@ const path = require('path');
 const express = require('express');
 const session = require('express-session');
 
-const { stmts } = require('./lib/db');
+const { stmts, ready } = require('./lib/db');
+const { LibsqlStore } = require('./lib/session-store');
 const { validarHorario, ventanaDe } = require('./lib/horarios');
 const { evaluarChoice } = require('./lib/grading');
 const { generarPdf } = require('./lib/pdf');
@@ -29,11 +30,22 @@ app.use(
   session({
     name: 'examen.sid',
     secret: process.env.SESSION_SECRET || 'examen-secret-cambiar-en-produccion',
+    store: new LibsqlStore({ ttl: 4 * 60 * 60 * 1000 }),
     resave: false,
     saveUninitialized: false,
     cookie: { httpOnly: true, sameSite: 'lax', maxAge: 4 * 60 * 60 * 1000 }
   })
 );
+
+// En serverless el esquema se crea en el primer request de cada instancia.
+app.use(async (req, res, next) => {
+  try {
+    await ready;
+    next();
+  } catch (err) {
+    next(err);
+  }
+});
 
 const TZ = 'America/Argentina/Salta';
 const fmtTs = new Intl.DateTimeFormat('en-CA', {
@@ -65,8 +77,8 @@ function requiereAlumno(req, res, next) {
 }
 
 /** Para la vista del examen: si ya entrego, no vuelve a entrar. */
-function bloqueaSiYaEntrego(req, res, next) {
-  const entrega = stmts.getRespuestaByAlumno.get(req.session.alumno.documento);
+async function bloqueaSiYaEntrego(req, res, next) {
+  const entrega = await stmts.getRespuestaByAlumno.get(req.session.alumno.documento);
   if (entrega) {
     return renderLogin(res, {
       error: 'Ya entregaste tu examen. Solo se permite un único intento.',
@@ -77,8 +89,9 @@ function bloqueaSiYaEntrego(req, res, next) {
 }
 
 /** Renderiza la vista login con los grupos actuales (horarios). */
-function renderLogin(res, data) {
-  return res.render('login', { grupos: stmts.listarGrupos.all(), ...data });
+async function renderLogin(res, data) {
+  const grupos = await stmts.listarGrupos.all();
+  return res.render('login', { grupos, ...data });
 }
 
 function requiereAdmin(req, res, next) {
@@ -90,18 +103,18 @@ function requiereAdmin(req, res, next) {
 /*  PUBLICO: acceso + horarios                                         */
 /* ------------------------------------------------------------------ */
 
-app.get('/', (req, res) => {
+app.get('/', async (req, res) => {
   if (req.session.alumno) return res.redirect('/examen');
-  renderLogin(res, { error: null, documento: '' });
+  await renderLogin(res, { error: null, documento: '' });
 });
 
-app.post('/login', (req, res) => {
+app.post('/login', async (req, res) => {
   const documento = String(req.body.documento || '').trim();
   if (!documento) {
     return renderLogin(res, { error: 'Ingresa tu Número de Documento.', documento: '' });
   }
 
-  const alumno = stmts.getAlumno.get(documento);
+  const alumno = await stmts.getAlumno.get(documento);
   if (!alumno) {
     return renderLogin(res, {
       error: 'Documento inexistente. Verifica con tu profesor.',
@@ -109,7 +122,7 @@ app.post('/login', (req, res) => {
     });
   }
 
-  const entrega = stmts.getRespuestaByAlumno.get(documento);
+  const entrega = await stmts.getRespuestaByAlumno.get(documento);
   if (entrega) {
     return renderLogin(res, {
       error: 'Ya entregaste tu examen. Solo se permite un único intento.',
@@ -117,7 +130,7 @@ app.post('/login', (req, res) => {
     });
   }
 
-  const horario = validarHorario(alumno.grupo_id);
+  const horario = await validarHorario(alumno.grupo_id);
   if (!horario.ok) {
     return renderLogin(res, { error: horario.motivo, documento });
   }
@@ -141,9 +154,9 @@ app.post('/logout', (req, res) => {
 /*  EXAMEN                                                             */
 /* ------------------------------------------------------------------ */
 
-app.get('/examen', requiereAlumno, bloqueaSiYaEntrego, (req, res) => {
-  const alumno = stmts.getAlumno.get(req.session.alumno.documento);
-  const preguntas = alumno ? stmts.preguntasDeMateria.all(alumno.materia_id || 0) : [];
+app.get('/examen', requiereAlumno, bloqueaSiYaEntrego, async (req, res) => {
+  const alumno = await stmts.getAlumno.get(req.session.alumno.documento);
+  const preguntas = alumno ? await stmts.preguntasDeMateria.all(alumno.materia_id || 0) : [];
 
   const enRango = req.session.fin - Date.now();
   const restante = Math.max(0, Math.min(DURACION_EXAMEN_MS, enRango));
@@ -153,7 +166,7 @@ app.get('/examen', requiereAlumno, bloqueaSiYaEntrego, (req, res) => {
     preguntas,
     restanteMs: restante,
     serverNow: Date.now(),
-    ventana: ventanaDe(alumno.grupo_id)
+    ventana: await ventanaDe(alumno.grupo_id)
   });
 });
 
@@ -176,9 +189,9 @@ app.post('/api/abandono', (req, res) => {
  */
 app.post('/entregar', requiereAlumno, async (req, res) => {
   const documento = req.session.alumno.documento;
-  const alumno = stmts.getAlumno.get(documento);
+  const alumno = await stmts.getAlumno.get(documento);
 
-  if (stmts.getRespuestaByAlumno.get(documento)) {
+  if (await stmts.getRespuestaByAlumno.get(documento)) {
     return res.status(409).json({ ok: false, error: 'Ya entregaste tu examen.' });
   }
 
@@ -201,7 +214,7 @@ app.post('/entregar', requiereAlumno, async (req, res) => {
     if (Number.isInteger(n)) respuestas[n] = bruto[k];
   }
 
-  const preguntas = stmts.preguntasDeMateria.all(alumno.materia_id || 0);
+  const preguntas = await stmts.preguntasDeMateria.all(alumno.materia_id || 0);
   const { choice } = evaluarChoice(preguntas, respuestas);
 
   const timestamp = tsServidor();
@@ -221,7 +234,18 @@ app.post('/entregar', requiereAlumno, async (req, res) => {
   };
 
   try {
-    stmts.insertarRespuesta.run(fila);
+    await stmts.insertarRespuesta.run(
+      fila.documento_alumno,
+      fila.nombre_alumno,
+      fila.materia_id,
+      fila.respuestas_json,
+      fila.puntaje_choice,
+      fila.puntaje_desarrollo,
+      fila.puntaje_total_obtenido,
+      fila.timestamp_entrega,
+      fila.abandonos_count,
+      fila.estado
+    );
   } catch (e) {
     if (String(e.message).includes('UNIQUE')) {
       return res.status(409).json({ ok: false, error: 'Ya entregaste tu examen.' });
@@ -230,7 +254,7 @@ app.post('/entregar', requiereAlumno, async (req, res) => {
     return res.status(500).json({ ok: false, error: 'Error al guardar.' });
   }
 
-  const entrega = stmts.getRespuestaByAlumno.get(documento);
+  const entrega = await stmts.getRespuestaByAlumno.get(documento);
 
   // El temporizador/avisos de la sesion ya no sirven.
   delete req.session.fin;
@@ -271,15 +295,15 @@ async function generarYEnviar({ alumno, entrega, preguntas, respuestas }) {
   return out;
 }
 
-function prepararDatosPdf(respuestaId) {
-  const entrega = stmts.getRespuestaById.get(respuestaId);
+async function prepararDatosPdf(respuestaId) {
+  const entrega = await stmts.getRespuestaById.get(respuestaId);
   if (!entrega) return null;
   const alumno =
-    stmts.getAlumno.get(entrega.documento_alumno) ||
+    (await stmts.getAlumno.get(entrega.documento_alumno)) ||
     { documento: entrega.documento_alumno, nombre: entrega.nombre_alumno, email: '', grupo_id: 0 };
   let respuestas = {};
   try { respuestas = JSON.parse(entrega.respuestas_json || '{}'); } catch { /* noop */ }
-  const preguntas = stmts.preguntasDeMateria.all(entrega.materia_id || 0);
+  const preguntas = await stmts.preguntasDeMateria.all(entrega.materia_id || 0);
   return { alumno, entrega, preguntas, respuestas };
 }
 
@@ -308,39 +332,39 @@ app.post('/admin/logout', (req, res) => {
   req.session.destroy(() => res.redirect('/admin'));
 });
 
-app.get('/admin/panel', requiereAdmin, (req, res) => {
-  const alumnos = stmts.alumnosConEntrega.all();
-  const preguntas = stmts.listarPreguntas.all();
+app.get('/admin/panel', requiereAdmin, async (req, res) => {
+  const alumnos = await stmts.alumnosConEntrega.all();
+  const preguntas = await stmts.listarPreguntas.all();
   const maxPuntos = preguntas.reduce((a, p) => a + (Number(p.puntos) || 0), 0);
   res.render('admin/panel', {
     alumnos,
     preguntas,
     maxPuntos,
     hoy: tsServidor(),
-    instituciones: stmts.listarInstituciones.all(),
-    materias: stmts.listarMaterias.all()
+    instituciones: await stmts.listarInstituciones.all(),
+    materias: await stmts.listarMaterias.all()
   });
 });
 
-app.get('/admin/api/entregas', requiereAdmin, (req, res) => {
+app.get('/admin/api/entregas', requiereAdmin, async (req, res) => {
   res.json({
     ahora: Date.now(),
-    alumnos: stmts.alumnosConEntrega.all(),
-    maxPuntos: stmts.listarPreguntas.all().reduce((a, p) => a + (Number(p.puntos) || 0), 0),
-    materias: stmts.listarMaterias.all(),
-    instituciones: stmts.listarInstituciones.all()
+    alumnos: await stmts.alumnosConEntrega.all(),
+    maxPuntos: (await stmts.listarPreguntas.all()).reduce((a, p) => a + (Number(p.puntos) || 0), 0),
+    materias: await stmts.listarMaterias.all(),
+    instituciones: await stmts.listarInstituciones.all()
   });
 });
 
-app.get('/admin/api/alumnos', requiereAdmin, (req, res) => {
-  res.json({ alumnos: stmts.listarAlumnos.all() });
+app.get('/admin/api/alumnos', requiereAdmin, async (req, res) => {
+  res.json({ alumnos: await stmts.listarAlumnos.all() });
 });
 
-app.get('/admin/api/materias', requiereAdmin, (req, res) => {
+app.get('/admin/api/materias', requiereAdmin, async (req, res) => {
   const instId = Number(req.query.institucion) || 0;
   const lista = instId
-    ? stmts.materiasDeInstitucion.all(instId)
-    : stmts.listarMaterias.all();
+    ? await stmts.materiasDeInstitucion.all(instId)
+    : await stmts.listarMaterias.all();
   res.json({ materias: lista });
 });
 
@@ -348,7 +372,7 @@ app.get('/admin/api/materias', requiereAdmin, (req, res) => {
  *  Si el PDF ya fue enviado (pdf_enviado=1) la nota queda bloqueada. */
 app.post('/admin/calificar/:id', requiereAdmin, async (req, res) => {
   const id = Number(req.params.id);
-  const entrega = stmts.getRespuestaById.get(id);
+  const entrega = await stmts.getRespuestaById.get(id);
   if (!entrega) return res.status(404).json({ ok: false, error: 'Entrega inexistente.' });
   if (Number(entrega.pdf_enviado) === 1) {
     return res
@@ -361,10 +385,10 @@ app.post('/admin/calificar/:id', requiereAdmin, async (req, res) => {
     return res.status(400).json({ ok: false, error: 'Puntaje invalido.' });
   }
 
-  stmts.calificarDesarrollo.run(Math.round(puntos), Math.round(puntos), id);
-  const actualizada = stmts.getRespuestaById.get(id);
+  await stmts.calificarDesarrollo.run(Math.round(puntos), Math.round(puntos), id);
+  const actualizada = await stmts.getRespuestaById.get(id);
 
-  const datos = prepararDatosPdf(id);
+  const datos = await prepararDatosPdf(id);
   const resultado = datos
     ? await generarYEnviar({
         alumno: datos.alumno,
@@ -376,7 +400,7 @@ app.post('/admin/calificar/:id', requiereAdmin, async (req, res) => {
 
   // Se bloquea la nota recien cuando el PDF efectivamente llego por correo.
   const pdfEnviado = !!(resultado && resultado.correo && resultado.correo.ok);
-  if (pdfEnviado) stmts.marcarPdfEnviado.run(id);
+  if (pdfEnviado) await stmts.marcarPdfEnviado.run(id);
 
   res.json({
     ok: true,
@@ -393,7 +417,7 @@ app.post('/admin/calificar/:id', requiereAdmin, async (req, res) => {
  *  texto: el PDF se generara al calificar (evita duplicados). */
 app.post('/admin/devoluciones/:id', requiereAdmin, async (req, res) => {
   const id = Number(req.params.id);
-  const entrega = stmts.getRespuestaById.get(id);
+  const entrega = await stmts.getRespuestaById.get(id);
   if (!entrega) return res.status(404).json({ ok: false, error: 'Entrega inexistente.' });
 
   const texto = String(req.body.devoluciones == null ? '' : req.body.devoluciones).trim();
@@ -401,12 +425,12 @@ app.post('/admin/devoluciones/:id', requiereAdmin, async (req, res) => {
     return res.status(400).json({ ok: false, error: 'Texto demasiado largo (max 5000).' });
   }
 
-  stmts.guardarDevoluciones.run(texto || null, id);
-  const actualizada = stmts.getRespuestaById.get(id);
+  await stmts.guardarDevoluciones.run(texto || null, id);
+  const actualizada = await stmts.getRespuestaById.get(id);
 
   let resultado = null;
   if (Number(actualizada.pdf_enviado) === 1) {
-    const datos = prepararDatosPdf(id);
+    const datos = await prepararDatosPdf(id);
     if (datos) {
       resultado = await generarYEnviar({
         alumno: datos.alumno,
@@ -428,7 +452,7 @@ app.post('/admin/devoluciones/:id', requiereAdmin, async (req, res) => {
 /** Encabezado editable del PDF por entrega (titulo + texto libre). */
 app.post('/admin/encabezado/:id', requiereAdmin, async (req, res) => {
   const id = Number(req.params.id);
-  const entrega = stmts.getRespuestaById.get(id);
+  const entrega = await stmts.getRespuestaById.get(id);
   if (!entrega) return res.status(404).json({ ok: false, error: 'Entrega inexistente.' });
 
   const titulo = String(req.body.pdf_titulo == null ? '' : req.body.pdf_titulo).trim();
@@ -440,12 +464,12 @@ app.post('/admin/encabezado/:id', requiereAdmin, async (req, res) => {
     return res.status(400).json({ ok: false, error: 'Encabezado demasiado largo (max 2000).' });
   }
 
-  stmts.guardarEncabezadoPdf.run(titulo || null, encabezado || null, id);
-  const actualizada = stmts.getRespuestaById.get(id);
+  await stmts.guardarEncabezadoPdf.run(titulo || null, encabezado || null, id);
+  const actualizada = await stmts.getRespuestaById.get(id);
 
   let resultado = null;
   if (Number(actualizada.pdf_enviado) === 1) {
-    const datos = prepararDatosPdf(id);
+    const datos = await prepararDatosPdf(id);
     if (datos) {
       resultado = await generarYEnviar({
         alumno: datos.alumno,
@@ -467,7 +491,7 @@ app.post('/admin/encabezado/:id', requiereAdmin, async (req, res) => {
 
 app.get('/admin/pdf/:id', requiereAdmin, async (req, res) => {
   const id = Number(req.params.id);
-  const datos = prepararDatosPdf(id);
+  const datos = await prepararDatosPdf(id);
   if (!datos) return res.status(404).send('Entrega inexistente.');
 
   try {
@@ -479,8 +503,8 @@ app.get('/admin/pdf/:id', requiereAdmin, async (req, res) => {
   }
 });
 
-app.get('/admin/preview/:id', requiereAdmin, (req, res) => {
-  const datos = prepararDatosPdf(Number(req.params.id));
+app.get('/admin/preview/:id', requiereAdmin, async (req, res) => {
+  const datos = await prepararDatosPdf(Number(req.params.id));
   if (!datos) return res.status(404).send('Entrega inexistente.');
   const { construirHtml } = require('./lib/pdf');
   res.type('html').send(construirHtml(datos));
@@ -488,12 +512,12 @@ app.get('/admin/preview/:id', requiereAdmin, (req, res) => {
 
 /* --------- CRUD de preguntas --------- */
 
-app.get('/admin/preguntas', requiereAdmin, (req, res) => {
+app.get('/admin/preguntas', requiereAdmin, async (req, res) => {
   const materiaSel = Number(req.query.materia) || 0;
-  const todas = stmts.listarPreguntas.all();
+  const todas = await stmts.listarPreguntas.all();
   res.render('admin/preguntas', {
     preguntas: materiaSel ? todas.filter((p) => p.materia_id === materiaSel) : todas,
-    materias: stmts.listarMaterias.all(),
+    materias: await stmts.listarMaterias.all(),
     materiaSel,
     ok: req.query.ok || null,
     error: req.query.error || null
@@ -537,114 +561,118 @@ function destinoPreguntas(body) {
   return m ? `/admin/preguntas?materia=${m}&` : '/admin/preguntas?';
 }
 
-app.post('/admin/preguntas', requiereAdmin, (req, res) => {
+app.post('/admin/preguntas', requiereAdmin, async (req, res) => {
   try {
     const p = leerPreguntaForm(req.body);
     if (!p.texto) throw new Error('El texto de la pregunta es obligatorio.');
-    stmts.crearPregunta.run(p);
+    await stmts.crearPregunta.run(
+      p.texto, p.tipo, p.opciones_json, p.respuesta_correcta, p.puntos, p.materia_id
+    );
     res.redirect(destinoPreguntas(req.body) + 'ok=Pregunta+creada');
   } catch (e) {
     res.redirect(destinoPreguntas(req.body) + `error=${encodeURIComponent(e.message)}`);
   }
 });
 
-app.post('/admin/preguntas/:id/editar', requiereAdmin, (req, res) => {
+app.post('/admin/preguntas/:id/editar', requiereAdmin, async (req, res) => {
   try {
     const id = Number(req.params.id);
-    if (!stmts.getPregunta.get(id)) throw new Error('Pregunta inexistente.');
+    if (!(await stmts.getPregunta.get(id))) throw new Error('Pregunta inexistente.');
     const p = leerPreguntaForm(req.body);
     if (!p.texto) throw new Error('El texto de la pregunta es obligatorio.');
-    stmts.editarPregunta.run({ ...p, id });
+    await stmts.editarPregunta.run(
+      p.texto, p.tipo, p.opciones_json, p.respuesta_correcta, p.puntos, p.materia_id, id
+    );
     res.redirect(destinoPreguntas(req.body) + 'ok=Pregunta+actualizada');
   } catch (e) {
     res.redirect(destinoPreguntas(req.body) + `error=${encodeURIComponent(e.message)}`);
   }
 });
 
-app.post('/admin/preguntas/:id/borrar', requiereAdmin, (req, res) => {
-  stmts.borrarPregunta.run(Number(req.params.id));
+app.post('/admin/preguntas/:id/borrar', requiereAdmin, async (req, res) => {
+  await stmts.borrarPregunta.run(Number(req.params.id));
   res.redirect(destinoPreguntas(req.body) + 'ok=Pregunta+borrada');
 });
 
 /* --------- CRUD de instituciones y materias --------- */
 
-app.get('/admin/instituciones', requiereAdmin, (req, res) => {
+app.get('/admin/instituciones', requiereAdmin, async (req, res) => {
   res.render('admin/instituciones', {
-    instituciones: stmts.listarInstituciones.all(),
-    materias: stmts.listarMaterias.all(),
+    instituciones: await stmts.listarInstituciones.all(),
+    materias: await stmts.listarMaterias.all(),
     ok: req.query.ok || null,
     error: req.query.error || null
   });
 });
 
-app.post('/admin/instituciones', requiereAdmin, (req, res) => {
+app.post('/admin/instituciones', requiereAdmin, async (req, res) => {
   try {
     const nombre = String(req.body.nombre || '').trim();
     if (!nombre) throw new Error('El nombre es obligatorio.');
-    stmts.crearInstitucion.run(nombre);
+    await stmts.crearInstitucion.run(nombre);
     res.redirect('/admin/instituciones?ok=Institucion+creada');
   } catch (e) {
     res.redirect(`/admin/instituciones?error=${encodeURIComponent(e.message)}`);
   }
 });
 
-app.post('/admin/instituciones/:id/editar', requiereAdmin, (req, res) => {
+app.post('/admin/instituciones/:id/editar', requiereAdmin, async (req, res) => {
   try {
     const nombre = String(req.body.nombre || '').trim();
     if (!nombre) throw new Error('El nombre es obligatorio.');
-    stmts.editarInstitucion.run(nombre, Number(req.params.id));
+    await stmts.editarInstitucion.run(nombre, Number(req.params.id));
     res.redirect('/admin/instituciones?ok=Institucion+actualizada');
   } catch (e) {
     res.redirect(`/admin/instituciones?error=${encodeURIComponent(e.message)}`);
   }
 });
 
-app.post('/admin/instituciones/:id/borrar', requiereAdmin, (req, res) => {
+app.post('/admin/instituciones/:id/borrar', requiereAdmin, async (req, res) => {
   const id = Number(req.params.id);
-  if (stmts.contarMateriasDeInstitucion.get(id).n > 0) {
+  if ((await stmts.contarMateriasDeInstitucion.get(id)).n > 0) {
     return res.redirect(
       '/admin/instituciones?error=' + encodeURIComponent('No se puede borrar: la institucion tiene materias.')
     );
   }
-  stmts.borrarInstitucion.run(id);
+  await stmts.borrarInstitucion.run(id);
   res.redirect('/admin/instituciones?ok=Institucion+borrada');
 });
 
-app.post('/admin/materias', requiereAdmin, (req, res) => {
+app.post('/admin/materias', requiereAdmin, async (req, res) => {
   try {
     const nombre = String(req.body.nombre || '').trim();
     const institucion_id = Number(req.body.institucion_id) || 0;
     if (!nombre) throw new Error('El nombre es obligatorio.');
-    if (!stmts.getInstitucion.get(institucion_id)) throw new Error('Elegi una institucion.');
-    stmts.crearMateria.run(nombre, institucion_id);
+    if (!(await stmts.getInstitucion.get(institucion_id))) throw new Error('Elegi una institucion.');
+    await stmts.crearMateria.run(nombre, institucion_id);
     res.redirect('/admin/instituciones?ok=Materia+creada');
   } catch (e) {
     res.redirect(`/admin/instituciones?error=${encodeURIComponent(e.message)}`);
   }
 });
 
-app.post('/admin/materias/:id/editar', requiereAdmin, (req, res) => {
+app.post('/admin/materias/:id/editar', requiereAdmin, async (req, res) => {
   try {
     const nombre = String(req.body.nombre || '').trim();
     if (!nombre) throw new Error('El nombre es obligatorio.');
-    stmts.editarMateria.run(nombre, Number(req.params.id));
+    await stmts.editarMateria.run(nombre, Number(req.params.id));
     res.redirect('/admin/instituciones?ok=Materia+actualizada');
   } catch (e) {
     res.redirect(`/admin/instituciones?error=${encodeURIComponent(e.message)}`);
   }
 });
 
-app.post('/admin/materias/:id/borrar', requiereAdmin, (req, res) => {
+app.post('/admin/materias/:id/borrar', requiereAdmin, async (req, res) => {
   const id = Number(req.params.id);
-  const alumnos = stmts.contarAlumnosDeMateria.get(id).n;
-  const preguntas = stmts.contarPreguntasDeMateria.get(id).n;
+  const alumnos = (await stmts.contarAlumnosDeMateria.get(id)).n;
+  const preguntas = (await stmts.contarPreguntasDeMateria.get(id)).n;
   if (alumnos > 0 || preguntas > 0) {
     return res.redirect(
       '/admin/instituciones?error=' +
         encodeURIComponent(`No se puede borrar: la materia tiene ${alumnos} alumno(s) y ${preguntas} pregunta(s).`)
     );
   }
-  stmts.borrarMateria.run(id);
+  await stmts.borrarMateria.run(id);
   res.redirect('/admin/instituciones?ok=Materia+borrada');
 });
 
@@ -660,9 +688,9 @@ const DIAS_SEMANA = [
   { n: 6, label: 'Sabado' }
 ];
 
-app.get('/admin/grupos', requiereAdmin, (req, res) => {
+app.get('/admin/grupos', requiereAdmin, async (req, res) => {
   res.render('admin/grupos', {
-    grupos: stmts.listarGrupos.all(),
+    grupos: await stmts.listarGrupos.all(),
     dias: DIAS_SEMANA,
     ok: req.query.ok || null,
     error: req.query.error || null
@@ -686,53 +714,55 @@ function leerGrupoForm(body) {
   return { nombre, dia, hora_desde, hora_hasta };
 }
 
-app.post('/admin/grupos', requiereAdmin, (req, res) => {
+app.post('/admin/grupos', requiereAdmin, async (req, res) => {
   try {
-    stmts.crearGrupo.run(leerGrupoForm(req.body));
+    const g = leerGrupoForm(req.body);
+    await stmts.crearGrupo.run(g.nombre, g.dia, g.hora_desde, g.hora_hasta);
     res.redirect('/admin/grupos?ok=Grupo+creado');
   } catch (e) {
     res.redirect(`/admin/grupos?error=${encodeURIComponent(e.message)}`);
   }
 });
 
-app.post('/admin/grupos/:id/editar', requiereAdmin, (req, res) => {
+app.post('/admin/grupos/:id/editar', requiereAdmin, async (req, res) => {
   try {
     const id = Number(req.params.id);
-    if (!stmts.getGrupo.get(id)) throw new Error('Grupo inexistente.');
-    stmts.editarGrupo.run({ ...leerGrupoForm(req.body), id });
+    if (!(await stmts.getGrupo.get(id))) throw new Error('Grupo inexistente.');
+    const g = leerGrupoForm(req.body);
+    await stmts.editarGrupo.run(g.nombre, g.dia, g.hora_desde, g.hora_hasta, id);
     res.redirect('/admin/grupos?ok=Grupo+actualizado');
   } catch (e) {
     res.redirect(`/admin/grupos?error=${encodeURIComponent(e.message)}`);
   }
 });
 
-app.post('/admin/grupos/:id/borrar', requiereAdmin, (req, res) => {
+app.post('/admin/grupos/:id/borrar', requiereAdmin, async (req, res) => {
   const id = Number(req.params.id);
-  const alumnos = stmts.contarAlumnosDeGrupo.get(id).n;
+  const alumnos = (await stmts.contarAlumnosDeGrupo.get(id)).n;
   if (alumnos > 0) {
     return res.redirect(
       '/admin/grupos?error=' +
         encodeURIComponent(`No se puede borrar: el grupo tiene ${alumnos} alumno(s).`)
     );
   }
-  stmts.borrarGrupo.run(id);
+  await stmts.borrarGrupo.run(id);
   res.redirect('/admin/grupos?ok=Grupo+borrado');
 });
 
 /* --------- CRUD de alumnos --------- */
 
-app.get('/admin/alumnos', requiereAdmin, (req, res) => {
+app.get('/admin/alumnos', requiereAdmin, async (req, res) => {
   res.render('admin/alumnos', {
-    alumnos: stmts.listarAlumnos.all(),
-    materias: stmts.listarMaterias.all(),
-    instituciones: stmts.listarInstituciones.all(),
-    grupos: stmts.listarGrupos.all(),
+    alumnos: await stmts.listarAlumnos.all(),
+    materias: await stmts.listarMaterias.all(),
+    instituciones: await stmts.listarInstituciones.all(),
+    grupos: await stmts.listarGrupos.all(),
     ok: req.query.ok || null,
     error: req.query.error || null
   });
 });
 
-function leerAlumnoForm(body) {
+async function leerAlumnoForm(body) {
   const documento = String(body.documento || '').trim();
   const nombre = String(body.nombre || '').trim();
   const email = String(body.email || '').trim();
@@ -747,43 +777,43 @@ function leerAlumnoForm(body) {
   if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     throw new Error('Email invalido.');
   }
-  if (!stmts.getMateria.get(materia_id)) throw new Error('Elegi una materia.');
-  if (!stmts.getGrupo.get(grupo_id)) throw new Error('Elegi un grupo.');
+  if (!(await stmts.getMateria.get(materia_id))) throw new Error('Elegi una materia.');
+  if (!(await stmts.getGrupo.get(grupo_id))) throw new Error('Elegi un grupo.');
 
   return { documento, nombre, email, grupo_id, materia_id };
 }
 
-app.post('/admin/alumnos', requiereAdmin, (req, res) => {
+app.post('/admin/alumnos', requiereAdmin, async (req, res) => {
   try {
-    const a = leerAlumnoForm(req.body);
-    stmts.crearAlumno.run(a);
+    const a = await leerAlumnoForm(req.body);
+    await stmts.crearAlumno.run(a.documento, a.nombre, a.email, a.grupo_id, a.materia_id);
     res.redirect('/admin/alumnos?ok=Alumno+creado');
   } catch (e) {
     res.redirect(`/admin/alumnos?error=${encodeURIComponent(e.message)}`);
   }
 });
 
-app.post('/admin/alumnos/:documento/editar', requiereAdmin, (req, res) => {
+app.post('/admin/alumnos/:documento/editar', requiereAdmin, async (req, res) => {
   try {
     const doc = String(req.params.documento);
-    if (!stmts.getAlumno.get(doc)) throw new Error('Alumno inexistente.');
-    const a = leerAlumnoForm(req.body);
-    stmts.editarAlumno.run({ ...a, documento: doc });
+    if (!(await stmts.getAlumno.get(doc))) throw new Error('Alumno inexistente.');
+    const a = await leerAlumnoForm(req.body);
+    await stmts.editarAlumno.run(a.nombre, a.email, a.grupo_id, a.materia_id, doc);
     res.redirect('/admin/alumnos?ok=Alumno+actualizado');
   } catch (e) {
     res.redirect(`/admin/alumnos?error=${encodeURIComponent(e.message)}`);
   }
 });
 
-app.post('/admin/alumnos/:documento/borrar', requiereAdmin, (req, res) => {
+app.post('/admin/alumnos/:documento/borrar', requiereAdmin, async (req, res) => {
   const doc = String(req.params.documento);
-  if (stmts.alumnoTieneEntrega.get(doc)) {
+  if (await stmts.alumnoTieneEntrega.get(doc)) {
     return res.redirect(
       '/admin/alumnos?error=' +
         encodeURIComponent('No se puede borrar: el alumno ya entrego su examen.')
     );
   }
-  stmts.borrarAlumno.run(doc);
+  await stmts.borrarAlumno.run(doc);
   res.redirect('/admin/alumnos?ok=Alumno+borrado');
 });
 
@@ -791,6 +821,12 @@ app.post('/admin/alumnos/:documento/borrar', requiereAdmin, (req, res) => {
 
 app.use((req, res) => {
   res.status(404).send('No encontrado.');
+});
+
+app.use((err, req, res, next) => {
+  console.error('[error]', err);
+  if (res.headersSent) return next(err);
+  res.status(500).send('Error interno del servidor.');
 });
 
 const server = app.listen(PORT, () => {

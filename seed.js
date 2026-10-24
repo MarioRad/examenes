@@ -7,10 +7,12 @@
  * Crea las tablas e inserta la estructura de prueba:
  *   2 instituciones -> 4 materias -> 6 alumnos (3 sabado / 3 lunes)
  *   preguntas base por materia con puntajes 2, 3 y 5.
+ *
+ * Usa la misma base que la app (TURSO_DATABASE_URL o database.db local).
  */
 
 require('dotenv').config();
-const { db, stmts } = require('./lib/db');
+const { stmts, ready, one } = require('./lib/db');
 
 const instituciones = ['Instituto San Martin', 'Escuela Tecnica Norte'];
 
@@ -52,72 +54,70 @@ const preguntas = [
   { materia: 'Matematica', texto: 'Explica que es una funcion lineal con un ejemplo grafico.', tipo: 'desarrollo', opciones_json: null, respuesta_correcta: null, puntos: 3 }
 ];
 
-function upsertInstitucion(nombre) {
-  const existente = db.prepare('SELECT id FROM Instituciones WHERE nombre = ?').get(nombre);
+async function upsertInstitucion(nombre) {
+  const existente = await one('SELECT id FROM Instituciones WHERE nombre = ?', [nombre]);
   if (existente) return existente.id;
-  return stmts.crearInstitucion.run(nombre).lastInsertRowid;
+  return (await stmts.crearInstitucion.run(nombre)).lastInsertRowid;
 }
 
-function upsertMateria({ nombre, institucion }) {
-  const instId = upsertInstitucion(institucion);
-  const existente = db
-    .prepare('SELECT id FROM Materias WHERE nombre = ? AND institucion_id = ?')
-    .get(nombre, instId);
+async function upsertMateria({ nombre, institucion }) {
+  const instId = await upsertInstitucion(institucion);
+  const existente = await one(
+    'SELECT id FROM Materias WHERE nombre = ? AND institucion_id = ?',
+    [nombre, instId]
+  );
   if (existente) return existente.id;
-  return stmts.crearMateria.run(nombre, instId).lastInsertRowid;
+  return (await stmts.crearMateria.run(nombre, instId)).lastInsertRowid;
 }
 
-function seed() {
-  const run = db.transaction(() => {
-    for (const m of materias) upsertMateria(m);
+async function seed() {
+  await ready;
 
-    for (const a of alumnos) {
-      const materiaId = upsertMateria(
-        materias.find((m) => m.nombre === a.materia) || materias[0]
+  for (const m of materias) await upsertMateria(m);
+
+  for (const a of alumnos) {
+    const materiaId = await upsertMateria(
+      materias.find((m) => m.nombre === a.materia) || materias[0]
+    );
+    const doc = String(a.documento);
+    const existe = await one('SELECT documento FROM Alumnos WHERE documento = ?', [doc]);
+    if (existe) continue;
+    // Resuelve el nombre de grupo ('sabado'/'lunes') a su id en Grupos.
+    const grupo = await one('SELECT id FROM Grupos WHERE lower(nombre) = lower(?)', [a.grupo_dia]);
+    await stmts.crearAlumno.run(
+      doc,
+      a.nombre,
+      a.email,
+      grupo ? grupo.id : null,
+      materiaId
+    );
+  }
+
+  const hayPreguntas = Number((await one('SELECT COUNT(*) AS n FROM Preguntas')).n) > 0;
+  if (!hayPreguntas) {
+    for (const p of preguntas) {
+      const materiaId = await upsertMateria(
+        materias.find((m) => m.nombre === p.materia) || materias[0]
       );
-      const doc = String(a.documento);
-      const existe = db
-        .prepare('SELECT documento FROM Alumnos WHERE documento = ?')
-        .get(doc);
-      if (existe) continue;
-      // Resuelve el nombre de grupo ('sabado'/'lunes') a su id en Grupos.
-      const grupo = db
-        .prepare('SELECT id FROM Grupos WHERE lower(nombre) = lower(?)')
-        .get(a.grupo_dia);
-      stmts.crearAlumno.run({
-        documento: doc,
-        nombre: a.nombre,
-        email: a.email,
-        grupo_id: grupo ? grupo.id : null,
-        materia_id: materiaId
-      });
+      await stmts.crearPregunta.run(
+        p.texto,
+        p.tipo,
+        p.opciones_json,
+        p.respuesta_correcta,
+        p.puntos,
+        materiaId
+      );
     }
+  }
 
-    const hayPreguntas = db.prepare('SELECT COUNT(*) AS n FROM Preguntas').get().n > 0;
-    if (!hayPreguntas) {
-      for (const p of preguntas) {
-        const materiaId = upsertMateria(
-          materias.find((m) => m.nombre === p.materia) || materias[0]
-        );
-        stmts.crearPregunta.run({
-          texto: p.texto,
-          tipo: p.tipo,
-          opciones_json: p.opciones_json,
-          respuesta_correcta: p.respuesta_correcta,
-          puntos: p.puntos,
-          materia_id: materiaId
-        });
-      }
-    }
-  });
-
-  run();
-
-  const c = (t) => db.prepare(`SELECT COUNT(*) AS n FROM ${t}`).get().n;
-  console.log('[seed] Esquema verificado/creado en database.db');
-  console.log(`[seed] Instituciones: ${c('Instituciones')} | Materias: ${c('Materias')}`);
-  console.log(`[seed] Alumnos: ${c('Alumnos')} | Preguntas: ${c('Preguntas')}`);
+  const c = async (t) => Number((await one(`SELECT COUNT(*) AS n FROM ${t}`)).n);
+  console.log('[seed] Esquema verificado/creado');
+  console.log(`[seed] Instituciones: ${await c('Instituciones')} | Materias: ${await c('Materias')}`);
+  console.log(`[seed] Alumnos: ${await c('Alumnos')} | Preguntas: ${await c('Preguntas')}`);
   console.log('[seed] Listo. Ejecuta: npm start');
 }
 
-seed();
+seed().catch((e) => {
+  console.error('[seed] error:', e);
+  process.exit(1);
+});
