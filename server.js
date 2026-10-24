@@ -829,20 +829,28 @@ app.use((err, req, res, next) => {
   res.status(500).send('Error interno del servidor.');
 });
 
-const server = app.listen(PORT, () => {
-  console.log(`[server] http://localhost:${PORT}`);
-  console.log(`[server] Panel admin: /admin`);
-  if (process.env.DEV_BYPASS_SCHEDULE === '1') {
-    console.log('[server] DEV_BYPASS_SCHEDULE activo: horarios ignorados.');
-  }
-});
+// En Vercel el runtime importa este modulo y usa el export como handler:
+// solo se escucha en un puerto cuando se corre directamente (node server.js).
+const ejecucionDirecta = require.main === module;
+
+const server = ejecucionDirecta
+  ? app.listen(PORT, () => {
+      console.log(`[server] http://localhost:${PORT}`);
+      console.log(`[server] Panel admin: /admin`);
+      if (process.env.DEV_BYPASS_SCHEDULE === '1') {
+        console.log('[server] DEV_BYPASS_SCHEDULE activo: horarios ignorados.');
+      }
+    })
+  : null;
 
 process.on('SIGINT', async () => {
   try {
     const { cerrarBrowser } = require('./lib/pdf');
     await cerrarBrowser();
   } catch { /* noop */ }
-  server.close(() => process.exit(0));
+  if (server) server.close(() => process.exit(0));
+  else process.exit(0);
 });
 
-module.exports = { app, server };
+// Vercel usa el export por defecto como handler HTTP.
+module.exports = app;
