@@ -449,46 +449,6 @@ app.post('/admin/devoluciones/:id', requiereAdmin, async (req, res) => {
   });
 });
 
-/** Encabezado editable del PDF por entrega (titulo + texto libre). */
-app.post('/admin/encabezado/:id', requiereAdmin, async (req, res) => {
-  const id = Number(req.params.id);
-  const entrega = await stmts.getRespuestaById.get(id);
-  if (!entrega) return res.status(404).json({ ok: false, error: 'Entrega inexistente.' });
-
-  const titulo = String(req.body.pdf_titulo == null ? '' : req.body.pdf_titulo).trim();
-  const encabezado = String(req.body.pdf_encabezado == null ? '' : req.body.pdf_encabezado).trim();
-  if (titulo.length > 200) {
-    return res.status(400).json({ ok: false, error: 'Titulo demasiado largo (max 200).' });
-  }
-  if (encabezado.length > 2000) {
-    return res.status(400).json({ ok: false, error: 'Encabezado demasiado largo (max 2000).' });
-  }
-
-  await stmts.guardarEncabezadoPdf.run(titulo || null, encabezado || null, id);
-  const actualizada = await stmts.getRespuestaById.get(id);
-
-  let resultado = null;
-  if (Number(actualizada.pdf_enviado) === 1) {
-    const datos = await prepararDatosPdf(id);
-    if (datos) {
-      resultado = await generarYEnviar({
-        alumno: datos.alumno,
-        entrega: actualizada,
-        preguntas: datos.preguntas,
-        respuestas: datos.respuestas
-      });
-    }
-  }
-
-  res.json({
-    ok: true,
-    pdf_titulo: actualizada.pdf_titulo,
-    pdf_encabezado: actualizada.pdf_encabezado,
-    pdf_enviado: Number(actualizada.pdf_enviado) || 0,
-    correo: resultado ? resultado.correo : null
-  });
-});
-
 app.get('/admin/pdf/:id', requiereAdmin, async (req, res) => {
   const id = Number(req.params.id);
   const datos = await prepararDatosPdf(id);
@@ -620,7 +580,18 @@ app.post('/admin/instituciones/:id/editar', requiereAdmin, async (req, res) => {
   try {
     const nombre = String(req.body.nombre || '').trim();
     if (!nombre) throw new Error('El nombre es obligatorio.');
-    await stmts.editarInstitucion.run(nombre, Number(req.params.id));
+    const pdf_titulo = String(req.body.pdf_titulo || '').trim();
+    const pdf_encabezado = String(req.body.pdf_encabezado || '').trim();
+    if (pdf_titulo.length > 200) throw new Error('Titulo del PDF demasiado largo (max 200).');
+    if (pdf_encabezado.length > 2000) {
+      throw new Error('Encabezado del PDF demasiado largo (max 2000).');
+    }
+    await stmts.editarInstitucion.run(
+      nombre,
+      pdf_titulo || null,
+      pdf_encabezado || null,
+      Number(req.params.id)
+    );
     res.redirect('/admin/instituciones?ok=Institucion+actualizada');
   } catch (e) {
     res.redirect(`/admin/instituciones?error=${encodeURIComponent(e.message)}`);

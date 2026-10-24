@@ -83,7 +83,6 @@
     if (filtroMat) filtroMat.addEventListener('change', aplicarFiltros);
 
     const devoluciones = {}; // respuestaId -> texto actual (se llena en render)
-    const encabezados = {}; // respuestaId -> { pdf_titulo, pdf_encabezado }
     const falloEnvio = new Set(); // ids con el ultimo envio de correo fallido
 
     function fechaCorta(ts) {
@@ -98,10 +97,6 @@
       filas.forEach((a) => {
         if (a.respuesta_id) {
           devoluciones[a.respuesta_id] = a.devoluciones || '';
-          encabezados[a.respuesta_id] = {
-            pdf_titulo: a.pdf_titulo || '',
-            pdf_encabezado: a.pdf_encabezado || ''
-          };
         }
       });
 
@@ -119,7 +114,6 @@
             ? `<a class="btn btn-sm btn-primary" href="/admin/pdf/${id}" title="Descargar PDF">PDF</a>
                <a class="btn btn-sm btn-ghost" href="/admin/preview/${id}" target="_blank" title="Ver respuestas">Ver</a>
                <button type="button" class="btn btn-sm btn-ghost btn-correccion ${a.devoluciones ? 'tiene-dev' : ''}" data-id="${id}">Corrección</button>
-               <button type="button" class="btn btn-sm btn-ghost btn-encabezado" data-id="${id}">Encabezado</button>
                <button type="button" class="btn btn-sm btn-guardar" data-id="${id}"
                  ${falloEnvio.has(id) && !lock ? '' : 'hidden'}>${falloEnvio.has(id) ? 'Reenviar' : 'Guardar'}</button>`
             : '<span class="muted">sin entrega</span>';
@@ -299,78 +293,6 @@
       } finally {
         btnGuardarCorr.disabled = false;
         btnGuardarCorr.textContent = 'Guardar';
-      }
-    });
-
-    /* ---------- Modal: encabezado editable del PDF ---------- */
-    const modalEnc = $('#modalEncabezado');
-    const encTituloPdf = $('#encTituloPdf');
-    const encTexto = $('#encTexto');
-    const encSub = $('#encSubtitulo');
-    const btnGuardarEnc = $('#btnGuardarEnc');
-    const btnCancelarEnc = $('#btnCancelarEnc');
-
-    let encId = null;
-
-    function cerrarEncabezado() {
-      modalEnc.hidden = true;
-      encId = null;
-    }
-
-    tabla.addEventListener('click', (e) => {
-      const btn = e.target.closest('.btn-encabezado');
-      if (!btn) return;
-      encId = btn.dataset.id;
-      const fila = btn.closest('tr');
-      const nombreTd = fila ? fila.querySelector('td:nth-child(2)') : null;
-      encSub.textContent = nombreTd ? `${fila.dataset.documento} — ${nombreTd.textContent}` : '';
-      const actual = encabezados[encId] || {};
-      encTituloPdf.value = actual.pdf_titulo || '';
-      encTexto.value = actual.pdf_encabezado || '';
-      modalEnc.hidden = false;
-      encTituloPdf.focus();
-    });
-
-    btnCancelarEnc.addEventListener('click', cerrarEncabezado);
-    modalEnc.addEventListener('click', (e) => {
-      if (e.target === modalEnc) cerrarEncabezado();
-    });
-
-    btnGuardarEnc.addEventListener('click', async () => {
-      if (!encId) return;
-      btnGuardarEnc.disabled = true;
-      btnGuardarEnc.textContent = '...';
-      try {
-        const r = await fetch(`/admin/encabezado/${encId}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-          body: JSON.stringify({ pdf_titulo: encTituloPdf.value, pdf_encabezado: encTexto.value })
-        });
-        const d = await r.json();
-        if (!r.ok || !d.ok) throw new Error(d.error || 'Error');
-        encabezados[encId] = {
-          pdf_titulo: d.pdf_titulo || '',
-          pdf_encabezado: d.pdf_encabezado || ''
-        };
-        const idEnc = encId;
-        let extra;
-        if (Number(d.pdf_enviado) !== 1) {
-          extra = ' (se incluira en el PDF al calificar).';
-        } else if (d.correo && d.correo.ok) {
-          falloEnvio.delete(idEnc);
-          extra = ' — PDF reenviado por correo.';
-        } else {
-          falloEnvio.add(idEnc);
-          extra = ` — PDF regenerado, correo NO enviado${d.correo && d.correo.error ? ': ' + d.correo.error : ''}.`;
-        }
-        toast('Encabezado guardado.' + extra, d.correo && d.correo.error ? 'err' : 'ok');
-        cerrarEncabezado();
-        await refrescar();
-      } catch (err) {
-        toast('No se pudo guardar el encabezado: ' + err.message, 'err');
-      } finally {
-        btnGuardarEnc.disabled = false;
-        btnGuardarEnc.textContent = 'Guardar';
       }
     });
 

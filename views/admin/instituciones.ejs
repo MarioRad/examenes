@@ -53,6 +53,9 @@
                 <b><%= i.nombre %></b>
                 <span class="pill"><%= i.materias %> materia(s)</span>
               </div>
+              <p class="muted" style="margin:4px 0 0">
+                Encabezado del PDF: <%= i.pdf_titulo || 'por defecto' %>
+              </p>
               <div class="ip-acciones">
                 <button type="button" class="btn btn-sm btn-ghost btn-editar">Editar</button>
                 <form method="POST" action="/admin/instituciones/<%= i.id %>/borrar" class="form-borrar">
@@ -62,6 +65,21 @@
               <form method="POST" action="/admin/instituciones/<%= i.id %>/editar" class="form-editar" hidden>
                 <label>Nombre</label>
                 <input type="text" name="nombre" value="<%= i.nombre %>" required />
+                <label>Titulo del PDF</label>
+                <input
+                  type="text"
+                  name="pdf_titulo"
+                  maxlength="200"
+                  value="<%= i.pdf_titulo || '' %>"
+                  placeholder="Informe de Examen - Respuestas del alumno"
+                />
+                <label>Encabezado del PDF</label>
+                <textarea
+                  name="pdf_encabezado"
+                  rows="3"
+                  maxlength="2000"
+                  placeholder="Texto libre que aparece debajo del titulo (opcional)"
+                ><%= i.pdf_encabezado || '' %></textarea>
                 <div class="acciones-form">
                   <button type="submit" class="btn btn-sm btn-primary">Guardar</button>
                   <button type="button" class="btn btn-sm btn-ghost btn-cancelar-edicion">Cancelar</button>

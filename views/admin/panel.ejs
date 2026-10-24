@@ -120,7 +120,6 @@
                     <a class="btn btn-sm btn-primary" href="/admin/pdf/<%= a.respuesta_id %>" title="Descargar PDF">PDF</a>
                     <a class="btn btn-sm btn-ghost" href="/admin/preview/<%= a.respuesta_id %>" target="_blank" title="Ver respuestas">Ver</a>
                     <button type="button" class="btn btn-sm btn-ghost btn-correccion <%= a.devoluciones ? 'tiene-dev' : '' %>" data-id="<%= a.respuesta_id %>">Corrección</button>
-                    <button type="button" class="btn btn-sm btn-ghost btn-encabezado" data-id="<%= a.respuesta_id %>">Encabezado</button>
                     <button type="button" class="btn btn-sm btn-guardar" data-id="<%= a.respuesta_id %>" hidden>Guardar</button>
                   <% } else { %><span class="muted">sin entrega</span><% } %>
                 </td>
@@ -153,29 +152,6 @@
       <div class="corr-acciones">
         <button type="button" class="btn btn-ghost" id="btnCancelarCorr">Cancelar</button>
         <button type="button" class="btn btn-primary" id="btnGuardarCorr">Guardar</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Modal de encabezado editable del PDF -->
-  <div class="modal-overlay" id="modalEncabezado" hidden>
-    <div class="modal modal-correccion" role="dialog" aria-modal="true" aria-labelledby="encTitulo">
-      <h2 id="encTitulo">Encabezado del PDF</h2>
-      <p id="encSubtitulo" class="muted"></p>
-      <label class="lbl-enc" for="encTituloPdf">Titulo</label>
-      <input type="text" id="encTituloPdf" class="input-enc" maxlength="200"
-             placeholder="Titulo del PDF (opcional)" />
-      <label class="lbl-enc" for="encTexto">Texto de encabezado</label>
-      <textarea
-        id="encTexto"
-        class="textarea-correccion"
-        maxlength="2000"
-        rows="6"
-        placeholder="Texto libre que aparecera debajo del titulo en el PDF (opcional)..."
-      ></textarea>
-      <div class="corr-acciones">
-        <button type="button" class="btn btn-ghost" id="btnCancelarEnc">Cancelar</button>
-        <button type="button" class="btn btn-primary" id="btnGuardarEnc">Guardar</button>
       </div>
     </div>
   </div>
