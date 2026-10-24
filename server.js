@@ -6,7 +6,12 @@ const path = require('path');
 const express = require('express');
 const session = require('express-session');
 
-const { stmts, ready } = require('./lib/db');
+const {
+  stmts,
+  ready,
+  borrarMateriaEnCascada,
+  borrarInstitucionEnCascada
+} = require('./lib/db');
 const { LibsqlStore } = require('./lib/session-store');
 const { validarHorario, ventanaDe } = require('./lib/horarios');
 const { evaluarChoice } = require('./lib/grading');
@@ -599,13 +604,7 @@ app.post('/admin/instituciones/:id/editar', requiereAdmin, async (req, res) => {
 });
 
 app.post('/admin/instituciones/:id/borrar', requiereAdmin, async (req, res) => {
-  const id = Number(req.params.id);
-  if ((await stmts.contarMateriasDeInstitucion.get(id)).n > 0) {
-    return res.redirect(
-      '/admin/instituciones?error=' + encodeURIComponent('No se puede borrar: la institucion tiene materias.')
-    );
-  }
-  await stmts.borrarInstitucion.run(id);
+  await borrarInstitucionEnCascada(Number(req.params.id));
   res.redirect('/admin/instituciones?ok=Institucion+borrada');
 });
 
@@ -634,16 +633,7 @@ app.post('/admin/materias/:id/editar', requiereAdmin, async (req, res) => {
 });
 
 app.post('/admin/materias/:id/borrar', requiereAdmin, async (req, res) => {
-  const id = Number(req.params.id);
-  const alumnos = (await stmts.contarAlumnosDeMateria.get(id)).n;
-  const preguntas = (await stmts.contarPreguntasDeMateria.get(id)).n;
-  if (alumnos > 0 || preguntas > 0) {
-    return res.redirect(
-      '/admin/instituciones?error=' +
-        encodeURIComponent(`No se puede borrar: la materia tiene ${alumnos} alumno(s) y ${preguntas} pregunta(s).`)
-    );
-  }
-  await stmts.borrarMateria.run(id);
+  await borrarMateriaEnCascada(Number(req.params.id));
   res.redirect('/admin/instituciones?ok=Materia+borrada');
 });
 
@@ -777,14 +767,8 @@ app.post('/admin/alumnos/:documento/editar', requiereAdmin, async (req, res) => 
 });
 
 app.post('/admin/alumnos/:documento/borrar', requiereAdmin, async (req, res) => {
-  const doc = String(req.params.documento);
-  if (await stmts.alumnoTieneEntrega.get(doc)) {
-    return res.redirect(
-      '/admin/alumnos?error=' +
-        encodeURIComponent('No se puede borrar: el alumno ya entrego su examen.')
-    );
-  }
-  await stmts.borrarAlumno.run(doc);
+  // La entrega (si existe) se conserva como historial.
+  await stmts.borrarAlumno.run(String(req.params.documento));
   res.redirect('/admin/alumnos?ok=Alumno+borrado');
 });
 

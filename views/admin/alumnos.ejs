@@ -135,7 +135,13 @@
                     <td><%= a.institucion_nombre || '—' %></td>
                     <td class="c-acciones">
                       <button type="button" class="btn btn-sm btn-ghost btn-editar">Editar</button>
-                      <form method="POST" action="/admin/alumnos/<%= a.documento %>/borrar" class="form-borrar" style="display:inline">
+                      <form
+                        method="POST"
+                        action="/admin/alumnos/<%= a.documento %>/borrar"
+                        class="form-borrar"
+                        style="display:inline"
+                        data-confirm="¿Borrar el alumno? Sus entregas ya hechas se conservan como historial."
+                      >
                         <button type="submit" class="btn btn-sm btn-danger">Borrar</button>
                       </form>
                     </td>

@@ -426,7 +426,7 @@
 
   $$('.form-borrar').forEach((f) => {
     f.addEventListener('submit', (e) => {
-      if (!confirm('¿Seguro que queres borrar esto?')) e.preventDefault();
+      if (!confirm(f.dataset.confirm || '¿Seguro que queres borrar esto?')) e.preventDefault();
     });
   });
 
