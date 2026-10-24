@@ -18,6 +18,9 @@
   const btnEntendido = $('#btnEntendido');
   const btnEnviar = $('#btnEnviar');
   const bloqueoEstado = $('#bloqueoEstado');
+  const chipProgreso = $('#chipProgreso');
+  const avisoTiempo = $('#avisoTiempo');
+  const avisoTiempoMin = $('#avisoTiempoMin');
 
   /* -------------------- Estado -------------------- */
   let offsetServidor = CFG.serverNow - Date.now(); // servidor - cliente
@@ -27,6 +30,7 @@
   let enviando = false;
   let bloqueado = false;
   let avisoPendiente = null;
+  let avisado10 = false;
   const editores = {}; // preguntaId -> Quill
 
   /* -------------------- Quill -------------------- */
@@ -82,6 +86,38 @@
       });
   }
 
+  /* -------------------- Progreso de la resolucion -------------------- */
+  function actualizarProgreso() {
+    if (!chipProgreso) return;
+    const total = CFG.preguntas.length;
+    const respondidas = Object.keys(recoger()).length;
+    chipProgreso.textContent = `Respondidas: ${respondidas}/${total}`;
+    chipProgreso.classList.toggle('completo', total > 0 && respondidas === total);
+  }
+
+  /** Ids de preguntas obligatorias que quedaron sin responder. */
+  function faltanObligatorias() {
+    const respondidas = recoger();
+    return CFG.preguntas
+      .filter((p) => p.obligatoria)
+      .filter((p) => {
+        const v = respondidas[p.id];
+        if (v == null) return true;
+        if (Array.isArray(v)) return v.length === 0;
+        return String(v).replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').trim() === '';
+      })
+      .map((p) => p.id);
+  }
+
+  function marcarFaltantes(ids) {
+    document.querySelectorAll('.card-pregunta').forEach((sec) => sec.classList.remove('falta'));
+    const primera = ids
+      .map((id) => document.querySelector(`.card-pregunta[data-id="${id}"]`))
+      .filter(Boolean);
+    primera.forEach((sec) => sec.classList.add('falta'));
+    if (primera[0]) primera[0].scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+
   /* -------------------- Temporizador -------------------- */
   function restanteReal() {
     return finTs - (Date.now() + offsetServidor);
@@ -96,6 +132,16 @@
     reloj.textContent = h > 0 ? `${h}:${p(m)}:${p(s)}` : `${p(m)}:${p(s)}`;
     reloj.classList.toggle('bajo', ms <= 5 * 60 * 1000 && ms > 60 * 1000);
     reloj.classList.toggle('critico', ms <= 60 * 1000);
+  }
+
+  /** Aviso unico al alumno cuando queda poco tiempo. */
+  function avisarDiezMinutos(ms) {
+    if (!avisoTiempo) return;
+    if (ms > 10 * 60 * 1000) return;
+    const minutos = Math.max(1, Math.ceil(ms / 60000));
+    if (avisoTiempoMin) avisoTiempoMin.textContent = String(minutos);
+    avisoTiempo.hidden = false;
+    avisado10 = true;
   }
 
   async function sincronizarServidor() {
@@ -117,6 +163,7 @@
     tick = setInterval(() => {
       const ms = restanteReal();
       pintarReloj(ms);
+      avisarDiezMinutos(ms);
       if (ms <= 0 && !enviando && !bloqueado) {
         clearInterval(tick);
         entregar('entregado', 'tiempo');
@@ -162,6 +209,7 @@
       btnEnviar.textContent = 'Enviando...';
     }
     if (tick) clearInterval(tick);
+    if (avisoTiempo) avisoTiempo.hidden = true;
 
     try {
       const r = await fetch('/entregar', {
@@ -183,6 +231,17 @@
       }
       if (r.status === 410) {
         mostrarListo({ titulo: 'Tiempo agotado', choice: 'El tiempo del exámen expiró. Consulta con tu profesor.' });
+        return;
+      }
+      if (r.status === 400 && Array.isArray(d.faltantes)) {
+        enviando = false;
+        if (btnEnviar) {
+          btnEnviar.disabled = false;
+          btnEnviar.textContent = 'Entregar examen';
+        }
+        if (!bloqueado) iniciarTemporizador();
+        marcarFaltantes(d.faltantes);
+        alert(d.error || 'Faltan preguntas obligatorias.');
         return;
       }
       if (!r.ok || !d.ok) {
@@ -322,10 +381,22 @@
   if (btnEnviar) {
     btnEnviar.addEventListener('click', () => {
       if (bloqueado) return;
-      const vacias = Object.keys(editores).length + document.querySelectorAll('.card-pregunta[data-tipo="choice"]').length;
+
+      const faltantes = faltanObligatorias();
+      if (faltantes.length > 0) {
+        marcarFaltantes(faltantes);
+        alert(
+          faltantes.length === 1
+            ? 'Tenes 1 pregunta obligatoria sin responder. Completala antes de entregar.'
+            : `Tenes ${faltantes.length} preguntas obligatorias sin responder. Completalas antes de entregar.`
+        );
+        return;
+      }
+
+      const total = CFG.preguntas.length;
       const respondidas = Object.keys(recoger()).length;
       const ok = confirm(
-        `Vas a entregar el examen.\n\nRespondiste ${respondidas} de ${vacias} preguntas.\n\n¿Continuar?`
+        `Vas a entregar el examen.\n\nRespondiste ${respondidas} de ${total} preguntas.\n\n¿Continuar?`
       );
       if (ok) entregar('entregado', 'manual');
     });
@@ -341,6 +412,14 @@
   });
 
   iniciarEditores();
+
+  // Progreso: se recalcula al tildar opciones o escribir en los editores.
+  document.addEventListener('change', (e) => {
+    if (e.target.closest && e.target.closest('.card-pregunta')) actualizarProgreso();
+  });
+  Object.values(editores).forEach((q) => q.on('text-change', actualizarProgreso));
+
   iniciarTemporizador();
   pintarAvisos();
+  actualizarProgreso();
 })();

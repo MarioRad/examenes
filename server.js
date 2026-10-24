@@ -200,6 +200,7 @@ app.get('/examen', requiereAlumno, bloqueaSiYaEntrego, async (req, res) => {
     preguntas,
     restanteMs: restante,
     serverNow: Date.now(),
+    duracionMinutos: Math.max(1, Math.round(duracionExamenMs(alumno) / 60000)),
     ventana: ventanaFechas ? `${ventanaFechas} (${ventanaGrupo})` : ventanaGrupo
   });
 });
@@ -249,6 +250,28 @@ app.post('/entregar', requiereAlumno, async (req, res) => {
   }
 
   const preguntas = await stmts.preguntasDeMateria.all(alumno.materia_id || 0);
+
+  // Mientras quede tiempo, no se puede entregar sin responder las obligatorias.
+  if (!expulsado && ahora <= req.session.fin) {
+    const sinResponder = preguntas.filter((p) => {
+      if (!Number(p.obligatoria)) return false;
+      const v = respuestas[p.id];
+      if (v == null) return true;
+      if (Array.isArray(v)) return v.length === 0;
+      return String(v).replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').trim() === '';
+    });
+    if (sinResponder.length > 0) {
+      return res.status(400).json({
+        ok: false,
+        error:
+          sinResponder.length === 1
+            ? 'Falta responder 1 pregunta obligatoria.'
+            : `Faltan responder ${sinResponder.length} preguntas obligatorias.`,
+        faltantes: sinResponder.map((p) => p.id)
+      });
+    }
+  }
+
   const { choice } = evaluarChoice(preguntas, respuestas);
 
   const timestamp = tsServidor();
@@ -551,7 +574,9 @@ function leerPreguntaForm(body) {
     respuesta_correcta = JSON.stringify([...new Set(correctas)].sort((a, b) => a - b));
   }
 
-  return { texto, tipo, opciones_json, respuesta_correcta, puntos, materia_id };
+  const obligatoria = body.obligatoria === '1' || body.obligatoria === 'on' ? 1 : 0;
+
+  return { texto, tipo, opciones_json, respuesta_correcta, puntos, obligatoria, materia_id };
 }
 
 function destinoPreguntas(body) {
@@ -564,7 +589,7 @@ app.post('/admin/preguntas', requiereAdmin, async (req, res) => {
     const p = leerPreguntaForm(req.body);
     if (!p.texto) throw new Error('El texto de la pregunta es obligatorio.');
     await stmts.crearPregunta.run(
-      p.texto, p.tipo, p.opciones_json, p.respuesta_correcta, p.puntos, p.materia_id
+      p.texto, p.tipo, p.opciones_json, p.respuesta_correcta, p.puntos, p.obligatoria, p.materia_id
     );
     res.redirect(destinoPreguntas(req.body) + 'ok=Pregunta+creada');
   } catch (e) {
@@ -579,7 +604,8 @@ app.post('/admin/preguntas/:id/editar', requiereAdmin, async (req, res) => {
     const p = leerPreguntaForm(req.body);
     if (!p.texto) throw new Error('El texto de la pregunta es obligatorio.');
     await stmts.editarPregunta.run(
-      p.texto, p.tipo, p.opciones_json, p.respuesta_correcta, p.puntos, p.materia_id, id
+      p.texto, p.tipo, p.opciones_json, p.respuesta_correcta, p.puntos, p.obligatoria,
+      p.materia_id, id
     );
     res.redirect(destinoPreguntas(req.body) + 'ok=Pregunta+actualizada');
   } catch (e) {

@@ -71,6 +71,11 @@
             </div>
           </div>
 
+          <label class="check-obligatoria">
+            <input type="checkbox" name="obligatoria" value="1" />
+            Pregunta obligatoria (no se puede entregar sin responderla)
+          </label>
+
           <div id="bloqueChoice" hidden>
             <label for="opciones">Opciones (una por linea)</label>
             <textarea id="opciones" name="opciones" rows="4" placeholder="Opcion A&#10;Opcion B&#10;Opcion C"></textarea>
@@ -119,6 +124,9 @@
                   <span class="badge <%= p.tipo === 'choice' ? 'ok' : 'info' %>"><%= p.tipo %></span>
                   <% if (p.materia_nombre) { %>
                     <span class="badge muted"><%= p.materia_nombre %></span>
+                  <% } %>
+                  <% if (p.obligatoria) { %>
+                    <span class="badge info">obligatoria</span>
                   <% } %>
                   <span class="cp-puntos"><%= p.puntos %> pts</span>
                 </div>
@@ -172,6 +180,10 @@
                       <input type="number" name="puntos" min="0" step="0.01" value="<%= p.puntos %>" required />
                     </div>
                   </div>
+                  <label class="check-obligatoria">
+                    <input type="checkbox" name="obligatoria" value="1" <%= p.obligatoria ? 'checked' : '' %> />
+                    Pregunta obligatoria
+                  </label>
                   <div class="editar-choice" <%= p.tipo === 'choice' ? '' : 'hidden' %>>
                     <label>Opciones (una por linea)</label>
                     <textarea name="opciones" rows="3"><%= p.opciones_json ? JSON.parse(p.opciones_json).join('\n') : '' %></textarea>

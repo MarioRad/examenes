@@ -30,14 +30,22 @@
 
     <div class="topbar-avisos">
       <span class="chip-avisos" id="chipAvisos" title="Cambios de pestana registrados">Avisos: 0/3</span>
+      <span class="chip-avisos" id="chipProgreso" title="Preguntas respondidas">
+        Respondidas: 0/<%= preguntas.length %>
+      </span>
     </div>
   </header>
+
+  <div class="aviso-tiempo" id="avisoTiempo" role="alert" hidden>
+    Quedan <b id="avisoTiempoMin">10</b> minutos para que se cierre el examen.
+  </div>
 
   <main class="examen-main" id="examenMain">
     <div class="intro-card">
       <h1>Examen</h1>
       <p>
-        Tenes <b>60 minutos</b>. Respondé las preguntas de opcion multiple tildando las opciones
+        Tenes <b><%= String(Math.floor(duracionMinutos / 60)).padStart(2, '0') %>:<%= String(duracionMinutos % 60).padStart(2, '0') %></b> para resolver.
+        Respondé las preguntas de opcion multiple tildando las opciones
         y escribi las de desarrollo en el editor (podes pegar imagenes).
         <br />
         <b>Importante:</b> cambiar de pestana o minimizar la ventana cuenta como abandono.
@@ -48,11 +56,21 @@
 
     <form id="formExamen" novalidate>
       <% preguntas.forEach(function(p, i) { %>
-        <section class="card-pregunta" data-id="<%= p.id %>" data-tipo="<%= p.tipo %>">
+        <section
+          class="card-pregunta"
+          data-id="<%= p.id %>"
+          data-tipo="<%= p.tipo %>"
+          data-obligatoria="<%= p.obligatoria ? 1 : 0 %>"
+        >
           <header class="cp-header">
             <span class="cp-num"><%= i + 1 %></span>
             <div class="cp-texto"><%- p.texto %></div>
-            <span class="cp-puntos"><%= p.puntos %> pts</span>
+            <div class="cp-meta">
+              <% if (p.obligatoria) { %>
+                <span class="badge obligatoria" title="Pregunta obligatoria">obligatoria</span>
+              <% } %>
+              <span class="cp-puntos"><%= p.puntos %> pts</span>
+            </div>
           </header>
 
           <% if (p.tipo === 'choice') {
@@ -137,7 +155,7 @@
     window.__EXAMEN__ = {
       restanteMs: <%= restanteMs %>,
       serverNow: <%= serverNow %>,
-      preguntas: <%- JSON.stringify(preguntas.map(function(p){ return {id:p.id, tipo:p.tipo}; })) %>
+      preguntas: <%- JSON.stringify(preguntas.map(function(p){ return {id:p.id, tipo:p.tipo, obligatoria: p.obligatoria ? 1 : 0}; })) %>
     };
   </script>
   <script src="https://cdn.jsdelivr.net/npm/quill@2.0.3/dist/quill.js"></script>

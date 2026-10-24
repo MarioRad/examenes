@@ -510,6 +510,9 @@
         $('#texto').value = $('textarea[name=texto]', src).value;
         $('#tipo').value = $('select[name=tipo]', src).value;
         $('#puntos').value = $('input[name=puntos]', src).value;
+        const oblSrc = $('input[name=obligatoria]', src);
+        const oblForm = $('input[name=obligatoria]', formPregunta);
+        if (oblSrc && oblForm) oblForm.checked = oblSrc.checked;
         $('#opciones').value = $('textarea[name=opciones]', src).value;
         $('#correctas').value = $('input[name=correctas]', src).value;
         if (selMateria) selMateria.value = $('select[name=materia_id]', src).value;
