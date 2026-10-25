@@ -63,6 +63,8 @@ code {
   background: var(--card-2);
 }
 .btn:active { transform: scale(0.98); }
+.btn:disabled, .btn[disabled] { opacity: 0.5; cursor: not-allowed; }
+.btn:disabled:hover, .btn[disabled]:hover { transform: none; }
 .btn-primary { background: var(--prim); color: #fff; }
 .btn-primary:hover { background: var(--prim-d); }
 .btn-danger { background: var(--err); color: #fff; }

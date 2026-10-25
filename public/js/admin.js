@@ -104,16 +104,22 @@
         .map((a) => {
           const id = a.respuesta_id;
           const lock = Number(a.pdf_enviado) === 1;
+          const corregido = Number(a.corregido) === 1;
           const badgeEstado = !id
             ? '<span class="badge err" title="No entregado">X</span>'
-            : Number(a.corregido) === 1
+            : corregido
               ? '<span class="badge ok" title="Corregido">✓</span>'
               : `<span class="badge warn" title="${
                   a.estado === 'expulsado' ? 'Expulsado - sin corregir' : 'Sin corregir'
                 }">!</span>`;
 
+          const btnCorregir = corregido
+            ? `<button type="button" class="btn btn-sm btn-primary btn-corregir" data-id="${id}" disabled
+                 title="Examen corregido: la correccion ya esta finalizada">Corregir</button>`
+            : `<button type="button" class="btn btn-sm btn-primary btn-corregir" data-id="${id}">Corregir</button>`;
+
           const acciones = id
-            ? `<button type="button" class="btn btn-sm btn-primary btn-corregir" data-id="${id}">Corregir</button>
+            ? `${btnCorregir}
                <a class="btn btn-sm btn-ghost" href="/admin/pdf/${id}?ver=1" target="_blank" rel="noopener" title="Ver el PDF corregido">Ver</a>
                <button type="button" class="btn btn-sm btn-ghost btn-enviar" data-id="${id}">Enviar</button>
                ${lock ? '<span class="badge ok" title="PDF enviado al alumno">enviado</span>' : ''}`
@@ -124,6 +130,7 @@
           const grupoClase = `grupo-${a.grupo_dia}`;
           return `<tr data-documento="${esc(a.documento)}"
                       data-respuesta="${id || ''}"
+                      data-corregido="${corregido ? '1' : ''}"
                       data-institucion="${esc(a.institucion_id || '')}"
                       data-materia="${esc(a.materia_id || '')}"
                       data-estado="${esc(a.estado || '')}"
@@ -275,7 +282,10 @@
 
     tabla.addEventListener('click', async (e) => {
       const btnCorregir = e.target.closest('.btn-corregir');
-      if (btnCorregir) return abrirCorregir(btnCorregir.dataset.id);
+      if (btnCorregir) {
+        if (btnCorregir.disabled) return;
+        return abrirCorregir(btnCorregir.dataset.id);
+      }
 
       const btnEnviar = e.target.closest('.btn-enviar');
       if (btnEnviar) {
@@ -311,7 +321,12 @@
       // Clic en la fila: abre el examen del alumno con sus respuestas
       if (e.target.closest('a')) return; // "Ver" abre el PDF en otra pestana
       const fila = e.target.closest('tr[data-respuesta]');
-      if (fila && fila.dataset.respuesta) abrirCorregir(fila.dataset.respuesta);
+      if (!fila || !fila.dataset.respuesta) return;
+      if (fila.dataset.corregido === '1') {
+        toast('El examen ya fue corregido: la correccion esta finalizada.');
+        return;
+      }
+      abrirCorregir(fila.dataset.respuesta);
     });
 
     btnFinalizarCorr.addEventListener('click', async () => {

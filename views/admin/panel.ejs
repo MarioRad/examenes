@@ -98,6 +98,7 @@
                   data-institucion="<%= a.institucion_id || '' %>"
                   data-materia="<%= a.materia_id || '' %>"
                   data-estado="<%= a.estado || '' %>"
+                  data-corregido="<%= Number(a.corregido) === 1 ? '1' : '' %>"
                   class="<%= a.respuesta_id ? 'fila-entregada' : '' %>">
                 <td><code><%= a.documento %></code></td>
                 <td><%= a.nombre %></td>
@@ -123,7 +124,12 @@
                 <td class="c-total"><b><%= a.respuesta_id ? a.puntaje_total_obtenido : '—' %></b></td>
                 <td class="c-acciones">
                   <% if (a.respuesta_id) { %>
-                    <button type="button" class="btn btn-sm btn-primary btn-corregir" data-id="<%= a.respuesta_id %>">Corregir</button>
+                    <% if (Number(a.corregido) === 1) { %>
+                      <button type="button" class="btn btn-sm btn-primary btn-corregir" data-id="<%= a.respuesta_id %>"
+                              disabled title="Examen corregido: la correccion ya esta finalizada">Corregir</button>
+                    <% } else { %>
+                      <button type="button" class="btn btn-sm btn-primary btn-corregir" data-id="<%= a.respuesta_id %>">Corregir</button>
+                    <% } %>
                     <a class="btn btn-sm btn-ghost" href="/admin/pdf/<%= a.respuesta_id %>?ver=1" target="_blank" rel="noopener" title="Ver el PDF corregido">Ver</a>
                     <button type="button" class="btn btn-sm btn-ghost btn-enviar" data-id="<%= a.respuesta_id %>">Enviar</button>
                     <% if (Number(a.pdf_enviado) === 1) { %>
