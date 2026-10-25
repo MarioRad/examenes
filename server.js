@@ -648,7 +648,14 @@ app.get('/admin/pdf/:id', requiereAdmin, async (req, res) => {
 
   try {
     const { filePath } = await generarPdf(datos);
-    res.download(filePath, `examen_${datos.alumno.documento}.pdf`);
+    const nombre = `examen_${datos.alumno.documento}.pdf`;
+    // ?ver=1 -> se muestra en la pestana en vez de descargarlo
+    if (req.query.ver === '1') {
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `inline; filename="${nombre}"`);
+      return res.sendFile(filePath);
+    }
+    res.download(filePath, nombre);
   } catch (e) {
     console.error('[admin/pdf]', e);
     res.status(500).send('Error al generar el PDF.');

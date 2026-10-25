@@ -81,8 +81,8 @@
               <th>Fecha</th>
               <th>Estado</th>
               <th>Avisos</th>
-              <th>Choice</th>
-              <th>Correccion</th>
+              <th>Nota Choice</th>
+              <th>Nota Correcion</th>
               <th>Total</th>
               <th>Acciones</th>
             </tr>
@@ -107,26 +107,24 @@
                 <td class="c-entrego"><%= a.respuesta_id ? 'Si' : 'No' %></td>
                 <td class="c-ts"><%= fechaCorta(a.timestamp_entrega) %></td>
                 <td class="c-estado">
-                  <% if (a.estado === 'entregado') { %><span class="badge ok" title="Entregado">✓</span>
-                  <% } else if (a.estado === 'expulsado') { %><span class="badge err">expulsado</span>
-                  <% } else { %><span class="badge muted" title="No entregado">X</span><% } %>
+                  <% if (!a.respuesta_id) { %>
+                    <span class="badge err" title="No entregado">X</span>
+                  <% } else if (Number(a.corregido) === 1) { %>
+                    <span class="badge ok" title="Corregido">✓</span>
+                  <% } else { %>
+                    <span class="badge warn" title="<%= a.estado === 'expulsado' ? 'Expulsado - sin corregir' : 'Sin corregir' %>">!</span>
+                  <% } %>
                 </td>
                 <td class="c-avisos"><%= a.respuesta_id ? a.abandonos_count : '—' %></td>
                 <td class="c-choice"><%= a.respuesta_id ? a.puntaje_choice : '—' %></td>
                 <td class="c-corr">
-                  <% if (a.respuesta_id) { %>
-                    <b class="suma-corr"><%= a.puntaje_desarrollo %></b>
-                    <% if (Number(a.corregido) === 1) { %>
-                      <span class="badge ok" title="Examen corregido">✓</span>
-                    <% } else { %>
-                      <span class="badge warn" title="Examen sin corregir">alerta</span>
-                    <% } %>
-                  <% } else { %>—<% } %>
+                  <% if (a.respuesta_id) { %><b class="suma-corr"><%= a.puntaje_desarrollo %></b><% } else { %>—<% } %>
                 </td>
                 <td class="c-total"><b><%= a.respuesta_id ? a.puntaje_total_obtenido : '—' %></b></td>
                 <td class="c-acciones">
                   <% if (a.respuesta_id) { %>
                     <button type="button" class="btn btn-sm btn-primary btn-corregir" data-id="<%= a.respuesta_id %>">Corregir</button>
+                    <a class="btn btn-sm btn-ghost" href="/admin/pdf/<%= a.respuesta_id %>?ver=1" target="_blank" rel="noopener" title="Ver el PDF corregido">Ver</a>
                     <button type="button" class="btn btn-sm btn-ghost btn-enviar" data-id="<%= a.respuesta_id %>">Enviar</button>
                     <% if (Number(a.pdf_enviado) === 1) { %>
                       <span class="badge ok" title="PDF enviado al alumno">enviado</span>
@@ -141,8 +139,8 @@
       <p class="muted pie-tabla">
         Haz clic en una fila (o en <b>Corregir</b>) para ver el examen del alumno con sus
         respuestas: el desarrollo recibe la devolucion y el puntaje de la pregunta, y
-        <b>Finalizar</b> cierra la correccion. <b>Enviar</b> genera el PDF con la correccion
-        y lo manda al e-mail registrado del alumno.
+        <b>Finalizar</b> cierra la correccion. <b>Ver</b> muestra el PDF corregido y
+        <b>Enviar</b> lo manda al e-mail registrado del alumno.
       </p>
     </section>
   </main>

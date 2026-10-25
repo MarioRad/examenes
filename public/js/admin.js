@@ -104,25 +104,22 @@
         .map((a) => {
           const id = a.respuesta_id;
           const lock = Number(a.pdf_enviado) === 1;
-          const badgeEstado = !a.estado
-            ? '<span class="badge muted" title="No entregado">X</span>'
-            : a.estado === 'entregado'
-              ? '<span class="badge ok" title="Entregado">✓</span>'
-              : '<span class="badge err">expulsado</span>';
+          const badgeEstado = !id
+            ? '<span class="badge err" title="No entregado">X</span>'
+            : Number(a.corregido) === 1
+              ? '<span class="badge ok" title="Corregido">✓</span>'
+              : `<span class="badge warn" title="${
+                  a.estado === 'expulsado' ? 'Expulsado - sin corregir' : 'Sin corregir'
+                }">!</span>`;
 
           const acciones = id
             ? `<button type="button" class="btn btn-sm btn-primary btn-corregir" data-id="${id}">Corregir</button>
+               <a class="btn btn-sm btn-ghost" href="/admin/pdf/${id}?ver=1" target="_blank" rel="noopener" title="Ver el PDF corregido">Ver</a>
                <button type="button" class="btn btn-sm btn-ghost btn-enviar" data-id="${id}">Enviar</button>
                ${lock ? '<span class="badge ok" title="PDF enviado al alumno">enviado</span>' : ''}`
             : '<span class="muted">sin entrega</span>';
 
-          const corr = id
-            ? `<b class="suma-corr">${esc(a.puntaje_desarrollo)}</b> ${
-                Number(a.corregido) === 1
-                  ? '<span class="badge ok" title="Examen corregido">✓</span>'
-                  : '<span class="badge warn" title="Examen sin corregir">alerta</span>'
-              }`
-            : '—';
+          const corr = id ? `<b class="suma-corr">${esc(a.puntaje_desarrollo)}</b>` : '—';
 
           const grupoClase = `grupo-${a.grupo_dia}`;
           return `<tr data-documento="${esc(a.documento)}"
@@ -312,6 +309,7 @@
       }
 
       // Clic en la fila: abre el examen del alumno con sus respuestas
+      if (e.target.closest('a')) return; // "Ver" abre el PDF en otra pestana
       const fila = e.target.closest('tr[data-respuesta]');
       if (fila && fila.dataset.respuesta) abrirCorregir(fila.dataset.respuesta);
     });
