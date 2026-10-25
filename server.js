@@ -7,6 +7,7 @@ const express = require('express');
 const session = require('express-session');
 
 const {
+  stmtsExamenes,
   stmts,
   ready,
   borrarMateriaEnCascada,
