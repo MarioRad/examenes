@@ -116,10 +116,17 @@
                ${lock ? '<span class="badge ok" title="PDF enviado al alumno">enviado</span>' : ''}`
             : '<span class="muted">sin entrega</span>';
 
-          const nota = id ? a.puntaje_desarrollo : '—';
+          const corr = id
+            ? `<b class="suma-corr">${esc(a.puntaje_desarrollo)}</b> ${
+                Number(a.corregido) === 1
+                  ? '<span class="badge ok" title="Examen corregido">✓</span>'
+                  : '<span class="badge warn" title="Examen sin corregir">alerta</span>'
+              }`
+            : '—';
 
           const grupoClase = `grupo-${a.grupo_dia}`;
           return `<tr data-documento="${esc(a.documento)}"
+                      data-respuesta="${id || ''}"
                       data-institucion="${esc(a.institucion_id || '')}"
                       data-materia="${esc(a.materia_id || '')}"
                       data-estado="${esc(a.estado || '')}"
@@ -134,7 +141,7 @@
             <td class="c-estado">${badgeEstado}</td>
             <td class="c-avisos">${id ? a.abandonos_count : '—'}</td>
             <td class="c-choice">${id ? a.puntaje_choice : '—'}</td>
-            <td class="c-desarrollo">${nota}</td>
+            <td class="c-corr">${corr}</td>
             <td class="c-total"><b>${id ? a.puntaje_total_obtenido : '—'}</b></td>
             <td class="c-acciones">${acciones}</td>
           </tr>`;
@@ -165,7 +172,7 @@
     const corrSub = $('#corrSubtitulo');
     const corrGeneral = $('#corrGeneral');
     const corrTotal = $('#corrTotal');
-    const btnGuardarCorr = $('#btnGuardarCorr');
+    const btnFinalizarCorr = $('#btnFinalizarCorr');
     const btnCancelarCorr = $('#btnCancelarCorr');
 
     let corrId = null;
@@ -174,8 +181,8 @@
 
     async function abrirCorregir(id) {
       corrId = id;
-      btnGuardarCorr.disabled = false;
-      btnGuardarCorr.textContent = 'Guardar';
+      btnFinalizarCorr.disabled = false;
+      btnFinalizarCorr.textContent = 'Finalizar';
       try {
         const r = await fetch(`/admin/api/entrega/${id}`, { headers: { Accept: 'application/json' } });
         const d = await r.json();
@@ -233,8 +240,12 @@
             <div class="corr-puntaje">${p.tipo === 'choice' ? 'auto' : '0-' + p.puntos} ${puntajeHtml}</div>
           </header>
           ${cuerpo}
-          <textarea class="corr-devolucion" data-pid="${p.id}" rows="2" maxlength="5000"
-            placeholder="Devolucion del profesor (opcional)">${esc(devs[p.id] || '')}</textarea>
+          ${
+            p.tipo === 'desarrollo'
+              ? `<textarea class="corr-devolucion" data-pid="${p.id}" rows="2" maxlength="5000"
+            placeholder="Devolucion del profesor (opcional)">${esc(devs[p.id] || '')}</textarea>`
+              : ''
+          }
         </section>`;
     }
 
@@ -270,39 +281,45 @@
       if (btnCorregir) return abrirCorregir(btnCorregir.dataset.id);
 
       const btnEnviar = e.target.closest('.btn-enviar');
-      if (!btnEnviar) return;
-      const id = btnEnviar.dataset.id;
-      btnEnviar.disabled = true;
-      btnEnviar.textContent = '...';
-      try {
-        const r = await fetch(`/admin/enviar/${id}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-          body: '{}'
-        });
-        const d = await r.json();
-        if (!r.ok || !d.ok) throw new Error(d.error || 'Error');
-        const enviado = !!(d.correo && d.correo.ok);
-        if (enviado) falloEnvio.delete(id);
-        else falloEnvio.add(id);
-        toast(
-          enviado
-            ? 'PDF generado y enviado al e-mail del alumno.'
-            : `PDF generado, correo NO enviado${d.correo && d.correo.error ? ': ' + d.correo.error : ''}.`,
-          enviado ? 'ok' : 'err'
-        );
-        await refrescar();
-      } catch (err) {
-        toast('No se pudo enviar: ' + err.message, 'err');
-        btnEnviar.disabled = false;
-        btnEnviar.textContent = 'Enviar';
+      if (btnEnviar) {
+        const id = btnEnviar.dataset.id;
+        btnEnviar.disabled = true;
+        btnEnviar.textContent = '...';
+        try {
+          const r = await fetch(`/admin/enviar/${id}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+            body: '{}'
+          });
+          const d = await r.json();
+          if (!r.ok || !d.ok) throw new Error(d.error || 'Error');
+          const enviado = !!(d.correo && d.correo.ok);
+          if (enviado) falloEnvio.delete(id);
+          else falloEnvio.add(id);
+          toast(
+            enviado
+              ? 'PDF generado y enviado al e-mail del alumno.'
+              : `PDF generado, correo NO enviado${d.correo && d.correo.error ? ': ' + d.correo.error : ''}.`,
+            enviado ? 'ok' : 'err'
+          );
+          await refrescar();
+        } catch (err) {
+          toast('No se pudo enviar: ' + err.message, 'err');
+          btnEnviar.disabled = false;
+          btnEnviar.textContent = 'Enviar';
+        }
+        return;
       }
+
+      // Clic en la fila: abre el examen del alumno con sus respuestas
+      const fila = e.target.closest('tr[data-respuesta]');
+      if (fila && fila.dataset.respuesta) abrirCorregir(fila.dataset.respuesta);
     });
 
-    btnGuardarCorr.addEventListener('click', async () => {
+    btnFinalizarCorr.addEventListener('click', async () => {
       if (!corrId) return;
-      btnGuardarCorr.disabled = true;
-      btnGuardarCorr.textContent = '...';
+      btnFinalizarCorr.disabled = true;
+      btnFinalizarCorr.textContent = '...';
 
       const puntajes = {};
       corrLista.querySelectorAll('.corr-nota').forEach((inp) => {
@@ -320,7 +337,8 @@
           body: JSON.stringify({
             puntajes,
             devoluciones: devsPorPregunta,
-            devolucion_general: corrGeneral.value
+            devolucion_general: corrGeneral.value,
+            finalizar: 1
           })
         });
         const d = await r.json();
@@ -331,14 +349,14 @@
               ? ' — PDF reenviado al alumno.'
               : ' — PDF regenerado, correo NO enviado.'
             : ' (el PDF se genera al pulsar Enviar).';
-        toast(`Correccion guardada. Total: ${d.puntaje_total_obtenido} pts` + extra, 'ok');
+        toast(`Correccion finalizada. Total: ${d.puntaje_total_obtenido} pts` + extra, 'ok');
         cerrarCorreccion();
         await refrescar();
       } catch (err) {
-        toast('No se pudo guardar la correccion: ' + err.message, 'err');
+        toast('No se pudo finalizar la correccion: ' + err.message, 'err');
       } finally {
-        btnGuardarCorr.disabled = false;
-        btnGuardarCorr.textContent = 'Guardar';
+        btnFinalizarCorr.disabled = false;
+        btnFinalizarCorr.textContent = 'Finalizar';
       }
     });
 
@@ -348,6 +366,38 @@
 
     aplicarFiltros();
   }
+
+  /* ================================================================
+     CUENTA DEL PROFESOR: avatar en el barra superior -> modal
+     ================================================================ */
+  const btnCuenta = $('#btnCuenta');
+  const modalCuenta = $('#modalCuenta');
+  if (btnCuenta && modalCuenta) {
+    const cerrarCuenta = () => (modalCuenta.hidden = true);
+    btnCuenta.addEventListener('click', () => {
+      modalCuenta.hidden = false;
+      const primero = $('#cuentaNombre', modalCuenta);
+      if (primero) primero.focus();
+    });
+    $('#btnCerrarCuenta').addEventListener('click', cerrarCuenta);
+    modalCuenta.addEventListener('click', (e) => {
+      if (e.target === modalCuenta) cerrarCuenta();
+    });
+
+    // Vuelta del formulario (se guarda y se recarga el panel con ?cuenta=1)
+    if (new URLSearchParams(window.location.search).get('cuenta')) {
+      modalCuenta.hidden = false;
+      window.history.replaceState(null, '', window.location.pathname);
+    }
+  }
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    const corr = $('#modalCorregir');
+    const cuenta = $('#modalCuenta');
+    if (corr && !corr.hidden) $('#btnCancelarCorr').click();
+    else if (cuenta && !cuenta.hidden) cuenta.hidden = true;
+  });
 
   /* ================================================================
      ALUMNOS: cascada institucion -> materia + editar + filtros

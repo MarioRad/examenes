@@ -8,6 +8,11 @@
   <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
 </head>
 <body class="page-admin page-panel">
+  <%
+    var iniNombre = (profesor.nombre || '').trim();
+    var iniApellido = (profesor.apellido || '').trim();
+    var iniciales = (iniNombre.charAt(0) + iniApellido.charAt(0)).toUpperCase() || 'PR';
+  %>
 
   <header class="admin-topbar">
     <div class="at-left">
@@ -23,6 +28,10 @@
       <a href="/admin/grupos" class="btn btn-ghost">Grupos</a>
       <a href="/admin/instituciones" class="btn btn-ghost">Instituciones</a>
       <a href="/admin/preguntas" class="btn btn-ghost">Preguntas</a>
+      <button type="button" class="avatar" id="btnCuenta"
+              title="Cuenta del profesor"
+              aria-label="Cuenta del profesor"
+              aria-haspopup="dialog"><%= iniciales %></button>
       <form method="POST" action="/admin/logout" style="display:inline">
         <button type="submit" class="btn btn-ghost">Salir</button>
       </form>
@@ -73,7 +82,7 @@
               <th>Estado</th>
               <th>Avisos</th>
               <th>Choice</th>
-              <th>Desarrollo</th>
+              <th>Correccion</th>
               <th>Total</th>
               <th>Acciones</th>
             </tr>
@@ -85,6 +94,7 @@
                }
                alumnos.forEach(function(a) { %>
               <tr data-documento="<%= a.documento %>"
+                  data-respuesta="<%= a.respuesta_id || '' %>"
                   data-institucion="<%= a.institucion_id || '' %>"
                   data-materia="<%= a.materia_id || '' %>"
                   data-estado="<%= a.estado || '' %>"
@@ -103,7 +113,16 @@
                 </td>
                 <td class="c-avisos"><%= a.respuesta_id ? a.abandonos_count : '—' %></td>
                 <td class="c-choice"><%= a.respuesta_id ? a.puntaje_choice : '—' %></td>
-                <td class="c-desarrollo"><%= a.respuesta_id ? a.puntaje_desarrollo : '—' %></td>
+                <td class="c-corr">
+                  <% if (a.respuesta_id) { %>
+                    <b class="suma-corr"><%= a.puntaje_desarrollo %></b>
+                    <% if (Number(a.corregido) === 1) { %>
+                      <span class="badge ok" title="Examen corregido">✓</span>
+                    <% } else { %>
+                      <span class="badge warn" title="Examen sin corregir">alerta</span>
+                    <% } %>
+                  <% } else { %>—<% } %>
+                </td>
                 <td class="c-total"><b><%= a.respuesta_id ? a.puntaje_total_obtenido : '—' %></b></td>
                 <td class="c-acciones">
                   <% if (a.respuesta_id) { %>
@@ -120,59 +139,11 @@
         </table>
       </div>
       <p class="muted pie-tabla">
-        <b>Corregir</b> abre las respuestas del alumno con el puntaje por pregunta y un espacio
-        de devolucion para cada respuesta de desarrollo. <b>Enviar</b> genera el PDF con la
-        correccion y lo manda al e-mail registrado del alumno.
+        Haz clic en una fila (o en <b>Corregir</b>) para ver el examen del alumno con sus
+        respuestas: el desarrollo recibe la devolucion y el puntaje de la pregunta, y
+        <b>Finalizar</b> cierra la correccion. <b>Enviar</b> genera el PDF con la correccion
+        y lo manda al e-mail registrado del alumno.
       </p>
-    </section>
-
-    <!-- Cuenta del panel -->
-    <section class="card-form cuenta-panel">
-      <div class="tabla-titulo">
-        <h2>Cuenta</h2>
-        <span class="pill">profesor y acceso</span>
-      </div>
-
-      <div class="cuenta-grid">
-        <form method="POST" action="/admin/cuenta/profesor">
-          <label>Datos del profesor</label>
-          <div class="dos-col">
-            <div>
-              <label for="cuentaNombre">Nombre</label>
-              <input type="text" id="cuentaNombre" name="nombre" maxlength="60" value="<%= profesor.nombre %>" />
-            </div>
-            <div>
-              <label for="cuentaApellido">Apellido</label>
-              <input type="text" id="cuentaApellido" name="apellido" maxlength="60" value="<%= profesor.apellido %>" />
-            </div>
-          </div>
-          <p class="muted">Se usa en la planilla de notas cuando la materia no tiene profesor asignado.</p>
-          <div class="acciones-form">
-            <button type="submit" class="btn btn-primary">Guardar profesor</button>
-          </div>
-        </form>
-
-        <form method="POST" action="/admin/cuenta/password">
-          <label>Cambio de clave</label>
-          <div>
-            <label for="claveActual">Clave actual</label>
-            <input type="password" id="claveActual" name="actual" required autocomplete="current-password" />
-          </div>
-          <div class="dos-col">
-            <div>
-              <label for="claveNueva">Clave nueva</label>
-              <input type="password" id="claveNueva" name="nueva" minlength="6" required autocomplete="new-password" />
-            </div>
-            <div>
-              <label for="claveRepetir">Repetir clave</label>
-              <input type="password" id="claveRepetir" name="repetir" minlength="6" required autocomplete="new-password" />
-            </div>
-          </div>
-          <div class="acciones-form">
-            <button type="submit" class="btn btn-primary">Cambiar clave</button>
-          </div>
-        </form>
-      </div>
     </section>
   </main>
 
@@ -195,7 +166,62 @@
       <div class="corr-total" id="corrTotal"></div>
       <div class="corr-acciones">
         <button type="button" class="btn btn-ghost" id="btnCancelarCorr">Cancelar</button>
-        <button type="button" class="btn btn-primary" id="btnGuardarCorr">Guardar</button>
+        <button type="button" class="btn btn-primary" id="btnFinalizarCorr">Finalizar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Cuenta del profesor (desde el avatar) -->
+  <div class="modal-overlay" id="modalCuenta" hidden>
+    <div class="modal modal-cuenta" role="dialog" aria-modal="true" aria-labelledby="cuentaTitulo">
+      <div class="cuenta-head">
+        <span class="avatar avatar-lg"><%= iniciales %></span>
+        <div>
+          <h2 id="cuentaTitulo">Cuenta del profesor</h2>
+          <p class="muted"><%= profesor.completo || 'Sin datos cargados' %></p>
+        </div>
+        <button type="button" class="btn btn-ghost" id="btnCerrarCuenta" aria-label="Cerrar">Cerrar</button>
+      </div>
+
+      <div class="cuenta-grid">
+        <form method="POST" action="/admin/cuenta/profesor" class="cuenta-form">
+          <label>Datos del profesor</label>
+          <div class="dos-col">
+            <div>
+              <label for="cuentaNombre">Nombre</label>
+              <input type="text" id="cuentaNombre" name="nombre" maxlength="60" value="<%= profesor.nombre %>" />
+            </div>
+            <div>
+              <label for="cuentaApellido">Apellido</label>
+              <input type="text" id="cuentaApellido" name="apellido" maxlength="60" value="<%= profesor.apellido %>" />
+            </div>
+          </div>
+          <p class="muted">Se usa en el sistema: figure en la planilla de notas y en el encabezado del panel.</p>
+          <div class="acciones-form">
+            <button type="submit" class="btn btn-primary">Guardar profesor</button>
+          </div>
+        </form>
+
+        <form method="POST" action="/admin/cuenta/password" class="cuenta-form">
+          <label>Cambio de clave</label>
+          <div>
+            <label for="claveActual">Clave actual</label>
+            <input type="password" id="claveActual" name="actual" required autocomplete="current-password" />
+          </div>
+          <div class="dos-col">
+            <div>
+              <label for="claveNueva">Clave nueva</label>
+              <input type="password" id="claveNueva" name="nueva" minlength="6" required autocomplete="new-password" />
+            </div>
+            <div>
+              <label for="claveRepetir">Repetir clave</label>
+              <input type="password" id="claveRepetir" name="repetir" minlength="6" required autocomplete="new-password" />
+            </div>
+          </div>
+          <div class="acciones-form">
+            <button type="submit" class="btn btn-primary">Cambiar clave</button>
+          </div>
+        </form>
       </div>
     </div>
   </div>

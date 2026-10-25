@@ -445,9 +445,9 @@ app.post('/admin/cuenta/profesor', requiereAdmin, async (req, res) => {
       throw new Error('Nombre o apellido demasiado largos (max 60).');
     }
     await setProfesor(nombre, apellido);
-    res.redirect('/admin/panel?ok=Datos+del+profesor+guardados');
+    res.redirect('/admin/panel?ok=Datos+del+profesor+guardados&cuenta=1');
   } catch (e) {
-    res.redirect(`/admin/panel?error=${encodeURIComponent(e.message)}`);
+    res.redirect(`/admin/panel?error=${encodeURIComponent(e.message)}&cuenta=1`);
   }
 });
 
@@ -462,9 +462,9 @@ app.post('/admin/cuenta/password', requiereAdmin, async (req, res) => {
     if (nueva !== repetir) throw new Error('La clave nueva y su repeticion no coinciden.');
 
     await cambiarClave(nueva);
-    res.redirect('/admin/panel?ok=Clave+actualizada');
+    res.redirect('/admin/panel?ok=Clave+actualizada&cuenta=1');
   } catch (e) {
-    res.redirect(`/admin/panel?error=${encodeURIComponent(e.message)}`);
+    res.redirect(`/admin/panel?error=${encodeURIComponent(e.message)}&cuenta=1`);
   }
 });
 
@@ -508,6 +508,7 @@ app.get('/admin/api/entrega/:id', requiereAdmin, async (req, res) => {
     entrega: {
       id: datos.entrega.id,
       estado: datos.entrega.estado,
+      corregido: Number(datos.entrega.corregido) || 0,
       timestamp_entrega: datos.entrega.timestamp_entrega,
       abandonos_count: datos.entrega.abandonos_count,
       puntaje_choice: datos.entrega.puntaje_choice,
@@ -570,6 +571,8 @@ app.post('/admin/corregir/:id', requiereAdmin, async (req, res) => {
 
   const devs = {};
   for (const [pid, texto] of Object.entries(req.body.devoluciones || {})) {
+    const pregunta = porId.get(Number(pid));
+    if (!pregunta || pregunta.tipo !== 'desarrollo') continue; // devolucion solo en desarrollo
     const t = String(texto).trim();
     if (!t) continue;
     if (t.length > 5000) {
@@ -595,6 +598,10 @@ app.post('/admin/corregir/:id', requiereAdmin, async (req, res) => {
     id
   );
 
+  // "Finalizar" cierra la correccion y la marca como hecha en el panel.
+  const finalizar = ['1', 'true', true, 1].includes(req.body.finalizar);
+  if (finalizar) await stmts.marcarCorregido.run(id);
+
   const actualizada = await stmts.getRespuestaById.get(id);
   let resultado = null;
   if (Number(actualizada.pdf_enviado) === 1) {
@@ -607,6 +614,7 @@ app.post('/admin/corregir/:id', requiereAdmin, async (req, res) => {
     puntaje_desarrollo: actualizada.puntaje_desarrollo,
     puntaje_total_obtenido: actualizada.puntaje_total_obtenido,
     pdf_enviado: Number(actualizada.pdf_enviado) || 0,
+    corregido: Number(actualizada.corregido) || 0,
     correo: resultado ? resultado.correo : null
   });
 });
