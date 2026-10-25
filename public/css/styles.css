@@ -439,6 +439,90 @@ body.bloqueado .examen-main { pointer-events: none; filter: grayscale(0.7) brigh
   font: inherit;
 }
 .input-enc:focus { outline: none; border-color: var(--prim); }
+
+/* Correccion por pregunta (panel admin) */
+.modal-ancho {
+  width: min(940px, 100%);
+  max-height: 92vh;
+  display: flex;
+  flex-direction: column;
+}
+.corr-lista { max-height: 52vh; overflow-y: auto; padding-right: 6px; }
+.corr-item {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin-bottom: 10px;
+  background: rgba(255, 255, 255, 0.03);
+}
+.corr-item-head { display: flex; gap: 12px; justify-content: space-between; align-items: flex-start; }
+.corr-texto { flex: 1; font-size: 0.9rem; line-height: 1.4; }
+.corr-puntaje {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  font-size: 0.8rem;
+  color: var(--txt-mut);
+}
+.corr-nota {
+  width: 92px;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg-2);
+  color: var(--txt);
+  font: inherit;
+}
+.corr-nota:focus { outline: none; border-color: var(--prim); }
+.corr-opciones { margin: 8px 0; padding-left: 18px; font-size: 0.85rem; line-height: 1.5; }
+.corr-opciones .ok { color: #86efac; }
+.corr-opciones .mal { color: #fca5a5; text-decoration: line-through; }
+.corr-respuesta {
+  margin: 8px 0;
+  padding: 8px 10px;
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.02);
+  font-size: 0.88rem;
+  line-height: 1.5;
+  overflow: auto;
+  max-height: 260px;
+}
+.corr-respuesta img { max-width: 100%; height: auto; border-radius: 4px; }
+.corr-devolucion {
+  width: 100%;
+  margin-top: 6px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg-2);
+  color: var(--txt);
+  font: inherit;
+  font-size: 0.88rem;
+  resize: vertical;
+}
+.corr-devolucion:focus { outline: none; border-color: var(--prim); }
+.corr-total {
+  margin-top: 12px;
+  padding: 9px 12px;
+  border-radius: 9px;
+  background: rgba(34, 197, 94, 0.12);
+  border: 1px solid rgba(34, 197, 94, 0.35);
+  font-weight: 700;
+  font-size: 0.9rem;
+}
+
+/* Cuenta del panel: profesor y clave */
+.cuenta-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 26px;
+  margin-top: 12px;
+}
+
+/* Panel: la tabla ocupa todo el ancho disponible */
+.page-panel .admin-main { max-width: none; width: 100%; }
 .fila-grupo { flex-wrap: wrap; }
 .fila-grupo input[type="time"], .fila-grupo select { flex: 1 1 130px; min-width: 120px; padding: 7px 9px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg-2); color: var(--txt); font: inherit; }
 .fila-grupo input[name="nombre"] { flex: 2 1 180px; }

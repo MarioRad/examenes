@@ -13,6 +13,7 @@ const {
   borrarInstitucionEnCascada
 } = require('./lib/db');
 const { LibsqlStore } = require('./lib/session-store');
+const { getProfesor, setProfesor, verificarClave, cambiarClave } = require('./lib/cuenta');
 const {
   validarHorario,
   ventanaDe,
@@ -27,7 +28,6 @@ const { enviarPdf } = require('./lib/mailer');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'admin123';
 const GRACIA_ENTREGA_MS = 10 * 60 * 1000;
 
 app.set('view engine', 'ejs');
@@ -331,10 +331,17 @@ app.post('/entregar', requiereAlumno, async (req, res) => {
 /**
  * Genera PDF y envia por Gmail. Nunca revierte la entrega.
  */
-async function generarYEnviar({ alumno, entrega, preguntas, respuestas }) {
+async function generarYEnviar({ alumno, entrega, preguntas, respuestas, puntuacion, devoluciones }) {
   const out = { pdf: null, correo: null };
   try {
-    const { filePath } = await generarPdf({ alumno, entrega, preguntas, respuestas });
+    const { filePath } = await generarPdf({
+      alumno,
+      entrega,
+      preguntas,
+      respuestas,
+      puntuacion,
+      devoluciones
+    });
     out.pdf = filePath;
     const mail = await enviarPdf({
       email: alumno.email,
@@ -361,7 +368,28 @@ async function prepararDatosPdf(respuestaId) {
   let respuestas = {};
   try { respuestas = JSON.parse(entrega.respuestas_json || '{}'); } catch { /* noop */ }
   const preguntas = await stmts.preguntasDeMateria.all(entrega.materia_id || 0);
-  return { alumno, entrega, preguntas, respuestas };
+
+  // Puntaje por pregunta (choice automatico, desarrollo manual) y devoluciones.
+  const { detalle } = evaluarChoice(preguntas, respuestas);
+  const choicePorId = new Map(detalle.map((d) => [d.id, d.obtenidos]));
+  let notas = {};
+  let devs = {};
+  try { notas = JSON.parse(entrega.puntajes_json || '{}'); } catch { /* noop */ }
+  try { devs = JSON.parse(entrega.devoluciones_json || '{}'); } catch { /* noop */ }
+
+  const puntuacion = preguntas.map((p) => ({
+    id: p.id,
+    tipo: p.tipo,
+    max: Number(p.puntos) || 0,
+    obtenido:
+      p.tipo === 'choice'
+        ? choicePorId.get(p.id) || 0
+        : notas[p.id] == null
+          ? null
+          : puntaje(notas[p.id])
+  }));
+
+  return { alumno, entrega, preguntas, respuestas, puntuacion, devoluciones: devs };
 }
 
 /* ------------------------------------------------------------------ */
@@ -373,9 +401,9 @@ app.get('/admin', (req, res) => {
   res.render('admin/login', { error: null });
 });
 
-app.post('/admin/login', (req, res) => {
+app.post('/admin/login', async (req, res) => {
   const pass = String(req.body.password || '');
-  if (pass !== ADMIN_PASSWORD) {
+  if (!(await verificarClave(pass))) {
     return res.render('admin/login', { error: 'Contrasena incorrecta.' });
   }
   req.session.regenerate((err) => {
@@ -398,9 +426,46 @@ app.get('/admin/panel', requiereAdmin, async (req, res) => {
     preguntas,
     maxPuntos,
     hoy: tsServidor(),
+    profesor: await getProfesor(),
+    ok: req.query.ok || null,
+    error: req.query.error || null,
     instituciones: await stmts.listarInstituciones.all(),
     materias: await stmts.listarMaterias.all()
   });
+});
+
+/* --------- Cuenta del panel: profesor y clave --------- */
+
+app.post('/admin/cuenta/profesor', requiereAdmin, async (req, res) => {
+  try {
+    const nombre = String(req.body.nombre || '').trim();
+    const apellido = String(req.body.apellido || '').trim();
+    if (!nombre && !apellido) throw new Error('Completa el nombre y el apellido del profesor.');
+    if (nombre.length > 60 || apellido.length > 60) {
+      throw new Error('Nombre o apellido demasiado largos (max 60).');
+    }
+    await setProfesor(nombre, apellido);
+    res.redirect('/admin/panel?ok=Datos+del+profesor+guardados');
+  } catch (e) {
+    res.redirect(`/admin/panel?error=${encodeURIComponent(e.message)}`);
+  }
+});
+
+app.post('/admin/cuenta/password', requiereAdmin, async (req, res) => {
+  try {
+    const actual = String(req.body.actual || '');
+    const nueva = String(req.body.nueva || '');
+    const repetir = String(req.body.repetir || '');
+
+    if (!(await verificarClave(actual))) throw new Error('La clave actual no es correcta.');
+    if (nueva.length < 6) throw new Error('La clave nueva debe tener al menos 6 caracteres.');
+    if (nueva !== repetir) throw new Error('La clave nueva y su repeticion no coinciden.');
+
+    await cambiarClave(nueva);
+    res.redirect('/admin/panel?ok=Clave+actualizada');
+  } catch (e) {
+    res.redirect(`/admin/panel?error=${encodeURIComponent(e.message)}`);
+  }
 });
 
 app.get('/admin/api/entregas', requiereAdmin, async (req, res) => {
@@ -425,85 +490,146 @@ app.get('/admin/api/materias', requiereAdmin, async (req, res) => {
   res.json({ materias: lista });
 });
 
-/** Calificacion manual del desarrollo + recalculo + PDF + reenvio.
- *  Si el PDF ya fue enviado (pdf_enviado=1) la nota queda bloqueada. */
-app.post('/admin/calificar/:id', requiereAdmin, async (req, res) => {
+/** Entrega completa de un alumno para corregir en el panel. */
+app.get('/admin/api/entrega/:id', requiereAdmin, async (req, res) => {
+  const id = Number(req.params.id);
+  const datos = await prepararDatosPdf(id);
+  if (!datos) return res.status(404).json({ ok: false, error: 'Entrega inexistente.' });
+
+  const notas = {};
+  try { Object.assign(notas, JSON.parse(datos.entrega.puntajes_json || '{}')); } catch { /* noop */ }
+  const choicePorId = {};
+  datos.puntuacion.forEach((p) => {
+    if (p.tipo === 'choice') choicePorId[p.id] = p.obtenido;
+  });
+
+  res.json({
+    ok: true,
+    entrega: {
+      id: datos.entrega.id,
+      estado: datos.entrega.estado,
+      timestamp_entrega: datos.entrega.timestamp_entrega,
+      abandonos_count: datos.entrega.abandonos_count,
+      puntaje_choice: datos.entrega.puntaje_choice,
+      puntaje_desarrollo: datos.entrega.puntaje_desarrollo,
+      puntaje_total_obtenido: datos.entrega.puntaje_total_obtenido,
+      pdf_enviado: Number(datos.entrega.pdf_enviado) || 0
+    },
+    alumno: {
+      documento: datos.alumno.documento,
+      nombre: datos.alumno.nombre,
+      email: datos.alumno.email || '',
+      materia_nombre: datos.alumno.materia_nombre,
+      institucion_nombre: datos.alumno.institucion_nombre
+    },
+    preguntas: datos.preguntas.map((p) => ({
+      id: p.id,
+      texto: p.texto,
+      tipo: p.tipo,
+      puntos: Number(p.puntos) || 0,
+      opciones_json: p.opciones_json,
+      respuesta_correcta: p.respuesta_correcta
+    })),
+    respuestas: datos.respuestas,
+    puntajes: notas,
+    devoluciones: datos.devoluciones,
+    devolucion_general: datos.entrega.devoluciones || '',
+    puntajesChoice: choicePorId
+  });
+});
+
+/** Correccion: puntaje del desarrollo por pregunta + devolucion por respuesta.
+ *  Si el PDF ya fue enviado, se regenera y se reenvia con las correcciones. */
+app.post('/admin/corregir/:id', requiereAdmin, async (req, res) => {
   const id = Number(req.params.id);
   const entrega = await stmts.getRespuestaById.get(id);
   if (!entrega) return res.status(404).json({ ok: false, error: 'Entrega inexistente.' });
-  if (Number(entrega.pdf_enviado) === 1) {
-    return res
-      .status(409)
-      .json({ ok: false, error: 'El PDF ya fue enviado: la nota no puede modificarse.' });
+
+  const preguntas = await stmts.preguntasDeMateria.all(entrega.materia_id || 0);
+  const porId = new Map(preguntas.map((p) => [p.id, p]));
+
+  const notas = {};
+  for (const [pid, valor] of Object.entries(req.body.puntajes || {})) {
+    const pregunta = porId.get(Number(pid));
+    if (!pregunta) continue;
+    const v = String(valor).trim();
+    if (v === '') continue; // sin correccion: no aporta puntos
+    if (pregunta.tipo !== 'desarrollo') {
+      return res.status(400).json({ ok: false, error: 'El puntaje manual es solo para desarrollo.' });
+    }
+    const n = puntaje(v);
+    const max = Number(pregunta.puntos) || 0;
+    if (!Number.isFinite(n) || n < 0 || n > max) {
+      return res.status(400).json({
+        ok: false,
+        error: `Puntaje invalido en la pregunta ${pid}: debe estar entre 0 y ${max}.`
+      });
+    }
+    notas[Number(pid)] = n;
   }
 
-  const puntos = Number(req.body.puntaje_desarrollo);
-  if (!Number.isFinite(puntos) || puntos < 0) {
-    return res.status(400).json({ ok: false, error: 'Puntaje invalido.' });
+  const devs = {};
+  for (const [pid, texto] of Object.entries(req.body.devoluciones || {})) {
+    const t = String(texto).trim();
+    if (!t) continue;
+    if (t.length > 5000) {
+      return res.status(400).json({ ok: false, error: 'Devolucion demasiado larga (max 5000).' });
+    }
+    devs[Number(pid)] = t;
   }
 
-  const puntosRedondeados = puntaje(puntos);
-  await stmts.calificarDesarrollo.run(puntosRedondeados, puntosRedondeados, id);
+  const general = String(req.body.devolucion_general || '').trim();
+  if (general.length > 5000) {
+    return res.status(400).json({ ok: false, error: 'Devolucion general demasiado larga (max 5000).' });
+  }
+
+  const desarrollo = puntaje(
+    Object.values(notas).reduce((a, n) => a + (Number(n) || 0), 0)
+  );
+  await stmts.guardarCorreccion.run(
+    desarrollo,
+    desarrollo,
+    general || null,
+    Object.keys(devs).length ? JSON.stringify(devs) : null,
+    Object.keys(notas).length ? JSON.stringify(notas) : null,
+    id
+  );
+
   const actualizada = await stmts.getRespuestaById.get(id);
-
-  const datos = await prepararDatosPdf(id);
-  const resultado = datos
-    ? await generarYEnviar({
-        alumno: datos.alumno,
-        entrega: actualizada,
-        preguntas: datos.preguntas,
-        respuestas: datos.respuestas
-      })
-    : null;
-
-  // Se bloquea la nota recien cuando el PDF efectivamente llego por correo.
-  const pdfEnviado = !!(resultado && resultado.correo && resultado.correo.ok);
-  if (pdfEnviado) await stmts.marcarPdfEnviado.run(id);
+  let resultado = null;
+  if (Number(actualizada.pdf_enviado) === 1) {
+    const datos = await prepararDatosPdf(id);
+    if (datos) resultado = await generarYEnviar({ ...datos, entrega: actualizada });
+  }
 
   res.json({
     ok: true,
     puntaje_desarrollo: actualizada.puntaje_desarrollo,
     puntaje_total_obtenido: actualizada.puntaje_total_obtenido,
-    pdf_enviado: pdfEnviado ? 1 : Number(actualizada.pdf_enviado) || 0,
+    pdf_enviado: Number(actualizada.pdf_enviado) || 0,
     correo: resultado ? resultado.correo : null
   });
 });
 
-/** Devoluciones y correcciones del examen.
- *  Si el PDF ya fue enviado, se regenera y reenvia con las correcciones
- *  (la nota queda intacta). Si aun no se corrigio/envio, solo se guarda el
- *  texto: el PDF se generara al calificar (evita duplicados). */
-app.post('/admin/devoluciones/:id', requiereAdmin, async (req, res) => {
+/** Envia el examen corregido al e-mail del alumno y lo marca como enviado. */
+app.post('/admin/enviar/:id', requiereAdmin, async (req, res) => {
   const id = Number(req.params.id);
   const entrega = await stmts.getRespuestaById.get(id);
   if (!entrega) return res.status(404).json({ ok: false, error: 'Entrega inexistente.' });
 
-  const texto = String(req.body.devoluciones == null ? '' : req.body.devoluciones).trim();
-  if (texto.length > 5000) {
-    return res.status(400).json({ ok: false, error: 'Texto demasiado largo (max 5000).' });
-  }
+  const datos = await prepararDatosPdf(id);
+  if (!datos) return res.status(404).json({ ok: false, error: 'Entrega inexistente.' });
 
-  await stmts.guardarDevoluciones.run(texto || null, id);
-  const actualizada = await stmts.getRespuestaById.get(id);
-
-  let resultado = null;
-  if (Number(actualizada.pdf_enviado) === 1) {
-    const datos = await prepararDatosPdf(id);
-    if (datos) {
-      resultado = await generarYEnviar({
-        alumno: datos.alumno,
-        entrega: actualizada,
-        preguntas: datos.preguntas,
-        respuestas: datos.respuestas
-      });
-    }
-  }
+  const resultado = await generarYEnviar({ ...datos, entrega });
+  const pdfEnviado = !!(resultado.correo && resultado.correo.ok);
+  if (pdfEnviado) await stmts.marcarPdfEnviado.run(id);
 
   res.json({
     ok: true,
-    devoluciones: actualizada.devoluciones,
-    pdf_enviado: Number(actualizada.pdf_enviado) || 0,
-    correo: resultado ? resultado.correo : null
+    pdf: !!resultado.pdf,
+    correo: resultado.correo,
+    pdf_enviado: pdfEnviado ? 1 : Number(entrega.pdf_enviado) || 0,
+    error: resultado.error || null
   });
 });
 
@@ -549,7 +675,7 @@ app.get('/admin/planilla/:id', requiereAdmin, async (req, res) => {
       institucion: materia.institucion_nombre || '—',
       materia: materia.nombre,
       fecha: fechaCorta(tsServidor()).split(' - ')[0],
-      profesor: materia.profesor || '—',
+      profesor: materia.profesor || (await getProfesor()).completo || '—',
       alumnos
     });
     const nombreArchivo = `planilla_${materia.nombre}`.replace(/[^\w.-]+/g, '_') + '.pdf';

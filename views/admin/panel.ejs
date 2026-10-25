@@ -7,7 +7,7 @@
   <link rel="stylesheet" href="/css/styles.css" />
   <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
 </head>
-<body class="page-admin">
+<body class="page-admin page-panel">
 
   <header class="admin-topbar">
     <div class="at-left">
@@ -30,6 +30,9 @@
   </header>
 
   <main class="admin-main">
+    <% if (ok) { %><div class="alert alert-ok"><%= ok %></div><% } %>
+    <% if (error) { %><div class="alert alert-error"><%= error %></div><% } %>
+
     <section class="resumen">
       <div class="stat"><b id="statTotal"><%= alumnos.length %></b><span>Alumnos</span></div>
       <div class="stat"><b id="statEntregados">0</b><span>Entregados</span></div>
@@ -100,27 +103,15 @@
                 </td>
                 <td class="c-avisos"><%= a.respuesta_id ? a.abandonos_count : '—' %></td>
                 <td class="c-choice"><%= a.respuesta_id ? a.puntaje_choice : '—' %></td>
-                <td class="c-desarrollo">
-                  <% if (a.respuesta_id) { %>
-                    <input
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      class="input-nota"
-                      value="<%= a.puntaje_desarrollo %>"
-                      data-id="<%= a.respuesta_id %>"
-                      <%= a.pdf_enviado ? 'disabled title="PDF enviado: la nota esta bloqueada"' : '' %>
-                      aria-label="Puntaje desarrollo de <%= a.nombre %>"
-                    />
-                  <% } else { %>—<% } %>
-                </td>
+                <td class="c-desarrollo"><%= a.respuesta_id ? a.puntaje_desarrollo : '—' %></td>
                 <td class="c-total"><b><%= a.respuesta_id ? a.puntaje_total_obtenido : '—' %></b></td>
                 <td class="c-acciones">
                   <% if (a.respuesta_id) { %>
-                    <a class="btn btn-sm btn-primary" href="/admin/pdf/<%= a.respuesta_id %>" title="Descargar PDF">PDF</a>
-                    <a class="btn btn-sm btn-ghost" href="/admin/preview/<%= a.respuesta_id %>" target="_blank" title="Ver respuestas">Ver</a>
-                    <button type="button" class="btn btn-sm btn-ghost btn-correccion <%= a.devoluciones ? 'tiene-dev' : '' %>" data-id="<%= a.respuesta_id %>">Corrección</button>
-                    <button type="button" class="btn btn-sm btn-guardar" data-id="<%= a.respuesta_id %>" hidden>Guardar</button>
+                    <button type="button" class="btn btn-sm btn-primary btn-corregir" data-id="<%= a.respuesta_id %>">Corregir</button>
+                    <button type="button" class="btn btn-sm btn-ghost btn-enviar" data-id="<%= a.respuesta_id %>">Enviar</button>
+                    <% if (Number(a.pdf_enviado) === 1) { %>
+                      <span class="badge ok" title="PDF enviado al alumno">enviado</span>
+                    <% } %>
                   <% } else { %><span class="muted">sin entrega</span><% } %>
                 </td>
               </tr>
@@ -129,26 +120,79 @@
         </table>
       </div>
       <p class="muted pie-tabla">
-        Carga el puntaje del desarrollo (0 a los puntos de esas preguntas) y pulsa <b>Guardar</b>:
-        recalcula el total, genera el PDF y lo envia por Gmail. Una vez enviado, la nota queda bloqueada.
+        <b>Corregir</b> abre las respuestas del alumno con el puntaje por pregunta y un espacio
+        de devolucion para cada respuesta de desarrollo. <b>Enviar</b> genera el PDF con la
+        correccion y lo manda al e-mail registrado del alumno.
       </p>
+    </section>
+
+    <!-- Cuenta del panel -->
+    <section class="card-form cuenta-panel">
+      <div class="tabla-titulo">
+        <h2>Cuenta</h2>
+        <span class="pill">profesor y acceso</span>
+      </div>
+
+      <div class="cuenta-grid">
+        <form method="POST" action="/admin/cuenta/profesor">
+          <label>Datos del profesor</label>
+          <div class="dos-col">
+            <div>
+              <label for="cuentaNombre">Nombre</label>
+              <input type="text" id="cuentaNombre" name="nombre" maxlength="60" value="<%= profesor.nombre %>" />
+            </div>
+            <div>
+              <label for="cuentaApellido">Apellido</label>
+              <input type="text" id="cuentaApellido" name="apellido" maxlength="60" value="<%= profesor.apellido %>" />
+            </div>
+          </div>
+          <p class="muted">Se usa en la planilla de notas cuando la materia no tiene profesor asignado.</p>
+          <div class="acciones-form">
+            <button type="submit" class="btn btn-primary">Guardar profesor</button>
+          </div>
+        </form>
+
+        <form method="POST" action="/admin/cuenta/password">
+          <label>Cambio de clave</label>
+          <div>
+            <label for="claveActual">Clave actual</label>
+            <input type="password" id="claveActual" name="actual" required autocomplete="current-password" />
+          </div>
+          <div class="dos-col">
+            <div>
+              <label for="claveNueva">Clave nueva</label>
+              <input type="password" id="claveNueva" name="nueva" minlength="6" required autocomplete="new-password" />
+            </div>
+            <div>
+              <label for="claveRepetir">Repetir clave</label>
+              <input type="password" id="claveRepetir" name="repetir" minlength="6" required autocomplete="new-password" />
+            </div>
+          </div>
+          <div class="acciones-form">
+            <button type="submit" class="btn btn-primary">Cambiar clave</button>
+          </div>
+        </form>
+      </div>
     </section>
   </main>
 
   <div class="toast" id="toast" hidden></div>
 
-  <!-- Modal de devoluciones / correcciones -->
-  <div class="modal-overlay" id="modalCorreccion" hidden>
-    <div class="modal modal-correccion" role="dialog" aria-modal="true" aria-labelledby="corrTitulo">
-      <h2 id="corrTitulo">Devoluciones y correcciones</h2>
+  <!-- Modal de correccion por pregunta -->
+  <div class="modal-overlay" id="modalCorregir" hidden>
+    <div class="modal modal-correccion modal-ancho" role="dialog" aria-modal="true" aria-labelledby="corrTitulo">
+      <h2 id="corrTitulo">Corregir examen</h2>
       <p id="corrSubtitulo" class="muted"></p>
+      <div id="corrLista" class="corr-lista"></div>
+      <label class="lbl-enc" for="corrGeneral">Devolucion general</label>
       <textarea
-        id="corrTexto"
+        id="corrGeneral"
         class="textarea-correccion"
         maxlength="5000"
-        rows="8"
-        placeholder="Escribe las devoluciones y correcciones del examen..."
+        rows="3"
+        placeholder="Devolucion general para el alumno (opcional)..."
       ></textarea>
+      <div class="corr-total" id="corrTotal"></div>
       <div class="corr-acciones">
         <button type="button" class="btn btn-ghost" id="btnCancelarCorr">Cancelar</button>
         <button type="button" class="btn btn-primary" id="btnGuardarCorr">Guardar</button>

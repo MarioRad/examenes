@@ -111,19 +111,12 @@
               : '<span class="badge err">expulsado</span>';
 
           const acciones = id
-            ? `<a class="btn btn-sm btn-primary" href="/admin/pdf/${id}" title="Descargar PDF">PDF</a>
-               <a class="btn btn-sm btn-ghost" href="/admin/preview/${id}" target="_blank" title="Ver respuestas">Ver</a>
-               <button type="button" class="btn btn-sm btn-ghost btn-correccion ${a.devoluciones ? 'tiene-dev' : ''}" data-id="${id}">Corrección</button>
-               <button type="button" class="btn btn-sm btn-guardar" data-id="${id}"
-                 ${falloEnvio.has(id) && !lock ? '' : 'hidden'}>${falloEnvio.has(id) ? 'Reenviar' : 'Guardar'}</button>`
+            ? `<button type="button" class="btn btn-sm btn-primary btn-corregir" data-id="${id}">Corregir</button>
+               <button type="button" class="btn btn-sm btn-ghost btn-enviar" data-id="${id}">Enviar</button>
+               ${lock ? '<span class="badge ok" title="PDF enviado al alumno">enviado</span>' : ''}`
             : '<span class="muted">sin entrega</span>';
 
-          const nota = id
-            ? `<input type="number" min="0" step="0.01" class="input-nota"
-                 value="${a.puntaje_desarrollo}" data-id="${id}"
-                 ${lock ? 'disabled title="PDF enviado: la nota esta bloqueada"' : ''}
-                 aria-label="Puntaje desarrollo de ${esc(a.nombre)}" />`
-            : '—';
+          const nota = id ? a.puntaje_desarrollo : '—';
 
           const grupoClase = `grupo-${a.grupo_dia}`;
           return `<tr data-documento="${esc(a.documento)}"
@@ -148,28 +141,12 @@
         })
         .join('');
 
-      // Solo reescribimos si cambio algo (evita perder el foco en los inputs)
-      if (tbody.dataset.hash !== hash(nuevas)) {
-        const foco = document.activeElement;
-        const esNota = foco && foco.classList.contains('input-nota');
-        const val = esNota ? foco.value : null;
-        const pos = esNota ? foco.selectionStart : null;
+      // Solo reescribimos si cambio algo (evita pisar el modal de correccion abierto)
+      if (tbody.dataset.hash !== hash(nuevas) && modalCorregir.hidden) {
         tbody.innerHTML = nuevas;
         tbody.dataset.hash = hash(nuevas);
-        if (esNota) {
-          const nuevo = tbody.querySelector(`.input-nota[data-id="${foco.dataset.id}"]`);
-          if (nuevo) {
-            nuevo.focus();
-            try { novoSet(nuevo, val, pos); } catch { /* noop */ }
-          }
-        }
       }
       aplicarFiltros();
-    }
-
-    function novoSet(el, val, pos) {
-      if (typeof val === 'string') el.value = val;
-      if (typeof pos === 'number') try { el.setSelectionRange(pos, pos); } catch { /* noop */ }
     }
 
     async function refrescar() {
@@ -182,119 +159,192 @@
 
     setInterval(refrescar, 5000);
 
-    tabla.addEventListener('input', (e) => {
-      const inp = e.target.closest('.input-nota');
-      if (!inp) return;
-      const btn = $('.btn-guardar', inp.closest('tr'));
-      if (btn) btn.hidden = false;
-    });
-
-    tabla.addEventListener('click', async (e) => {
-      const btn = e.target.closest('.btn-guardar');
-      if (!btn) return;
-      const inp = $('.input-nota', btn.closest('tr'));
-      const puntos = Number(inp.value);
-      if (!Number.isFinite(puntos) || puntos < 0) return toast('Puntaje invalido', 'err');
-
-      btn.disabled = true;
-      btn.textContent = '...';
-      try {
-        const r = await fetch(`/admin/calificar/${btn.dataset.id}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-          body: JSON.stringify({ puntaje_desarrollo: puntos })
-        });
-        const d = await r.json();
-        if (!r.ok || !d.ok) throw new Error(d.error || 'Error');
-        const id = btn.dataset.id;
-        const enviado = !!(d.correo && d.correo.ok);
-        if (enviado) falloEnvio.delete(id);
-        else if (Number(d.pdf_enviado) !== 1) falloEnvio.add(id);
-        let extra;
-        if (Number(d.pdf_enviado) === 1 && enviado) {
-          extra = ' — PDF enviado: nota bloqueada.';
-        } else if (enviado) {
-          extra = ' — PDF enviado por correo.';
-        } else {
-          extra = ` — PDF generado, correo NO enviado${d.correo && d.correo.error ? ': ' + d.correo.error : ''}.`;
-        }
-        toast(`Guardado. Total: ${d.puntaje_total_obtenido} pts` + extra, enviado ? 'ok' : 'err');
-        await refrescar();
-      } catch (err) {
-        toast('No se pudo calificar: ' + err.message, 'err');
-        btn.disabled = false;
-        btn.textContent = 'Guardar';
-      }
-    });
-
-    /* ---------- Modal: devoluciones y correcciones ---------- */
-    const modalCorr = $('#modalCorreccion');
-    const corrTexto = $('#corrTexto');
+    /* ---------- Acciones: Corregir / Enviar ---------- */
+    const modalCorregir = $('#modalCorregir');
+    const corrLista = $('#corrLista');
     const corrSub = $('#corrSubtitulo');
+    const corrGeneral = $('#corrGeneral');
+    const corrTotal = $('#corrTotal');
     const btnGuardarCorr = $('#btnGuardarCorr');
     const btnCancelarCorr = $('#btnCancelarCorr');
 
     let corrId = null;
+    let corrPreguntas = [];
+    let corrChoice = 0;
+
+    async function abrirCorregir(id) {
+      corrId = id;
+      btnGuardarCorr.disabled = false;
+      btnGuardarCorr.textContent = 'Guardar';
+      try {
+        const r = await fetch(`/admin/api/entrega/${id}`, { headers: { Accept: 'application/json' } });
+        const d = await r.json();
+        if (!r.ok || !d.ok) throw new Error(d.error || 'Error');
+
+        corrSub.textContent = `${d.alumno.documento} — ${d.alumno.nombre} · ${
+          d.alumno.materia_nombre || '—'
+        }`;
+        corrGeneral.value = d.devolucion_general || '';
+        corrPreguntas = d.preguntas;
+        corrChoice = Number(d.entrega.puntaje_choice) || 0;
+        corrLista.innerHTML = d.preguntas.map((p) => bloqueCorreccion(p, d)).join('');
+        actualizarTotalCorreccion();
+        modalCorregir.hidden = false;
+      } catch (err) {
+        toast('No se pudo abrir la correccion: ' + err.message, 'err');
+        corrId = null;
+      }
+    }
+
+    function bloqueCorreccion(p, d) {
+      const resp = d.respuestas[p.id];
+      const devs = d.devoluciones || {};
+
+      let cuerpo;
+      if (p.tipo === 'choice') {
+        let ops = [];
+        let correctas = [];
+        try { ops = JSON.parse(p.opciones_json || '[]'); } catch { /* noop */ }
+        try { correctas = JSON.parse(p.respuesta_correcta || '[]').map(Number); } catch { /* noop */ }
+        const sel = Array.isArray(resp) ? resp.map(Number) : [];
+        cuerpo = `<ul class="corr-opciones">${ops
+          .map((op, i) => {
+            const cls = correctas.includes(i) ? 'ok' : sel.includes(i) ? 'mal' : '';
+            const marca = correctas.includes(i) ? '✔' : sel.includes(i) ? '✘' : '•';
+            return `<li class="${cls}">${marca} ${esc(op)}</li>`;
+          })
+          .join('')}</ul>`;
+      } else {
+        cuerpo = resp ? `<div class="corr-respuesta">${resp}</div>` : '<p class="muted">(sin respuesta)</p>';
+      }
+
+      const puntajeHtml =
+        p.tipo === 'desarrollo'
+          ? `<input type="number" min="0" step="0.01" max="${p.puntos}" class="corr-nota"
+               data-pid="${p.id}"
+               value="${d.puntajes && d.puntajes[p.id] != null ? esc(d.puntajes[p.id]) : ''}"
+               placeholder="0-${p.puntos}" aria-label="Puntaje de la pregunta ${p.id}" />`
+          : `<span class="badge ${d.puntajesChoice[p.id] ? 'ok' : 'err'}">${d.puntajesChoice[p.id] || 0} pts</span>`;
+
+      return `
+        <section class="corr-item" data-id="${p.id}">
+          <header class="corr-item-head">
+            <div class="corr-texto"><b>${esc(p.texto)}</b></div>
+            <div class="corr-puntaje">${p.tipo === 'choice' ? 'auto' : '0-' + p.puntos} ${puntajeHtml}</div>
+          </header>
+          ${cuerpo}
+          <textarea class="corr-devolucion" data-pid="${p.id}" rows="2" maxlength="5000"
+            placeholder="Devolucion del profesor (opcional)">${esc(devs[p.id] || '')}</textarea>
+        </section>`;
+    }
+
+    function actualizarTotalCorreccion() {
+      let desarrollo = 0;
+      corrLista.querySelectorAll('.corr-nota').forEach((inp) => {
+        const v = Number(String(inp.value).replace(',', '.'));
+        if (Number.isFinite(v) && v > 0) desarrollo += v;
+      });
+      const max = corrPreguntas.reduce(
+        (a, p) => a + (p.tipo === 'desarrollo' ? Number(p.puntos) || 0 : 0),
+        0
+      );
+      const red = (n) => Math.round(n * 100) / 100;
+      corrTotal.textContent = `Total: ${red(corrChoice + desarrollo)} pts (choice ${red(
+        corrChoice
+      )} + desarrollo ${red(desarrollo)} de ${max})`;
+    }
 
     function cerrarCorreccion() {
-      modalCorr.hidden = true;
+      modalCorregir.hidden = true;
       corrId = null;
     }
 
-    tabla.addEventListener('click', (e) => {
-      const btn = e.target.closest('.btn-correccion');
-      if (!btn) return;
-      corrId = btn.dataset.id;
-      const fila = btn.closest('tr');
-      const nombreTd = fila ? fila.querySelector('td:nth-child(2)') : null;
-      corrSub.textContent = nombreTd ? `${fila.dataset.documento} — ${nombreTd.textContent}` : '';
-      corrTexto.value = devoluciones[corrId] || '';
-      modalCorr.hidden = false;
-      corrTexto.focus();
-    });
-
     btnCancelarCorr.addEventListener('click', cerrarCorreccion);
-    modalCorr.addEventListener('click', (e) => {
-      if (e.target === modalCorr) cerrarCorreccion();
+    modalCorregir.addEventListener('click', (e) => {
+      if (e.target === modalCorregir) cerrarCorreccion();
+    });
+    corrLista.addEventListener('input', actualizarTotalCorreccion);
+
+    tabla.addEventListener('click', async (e) => {
+      const btnCorregir = e.target.closest('.btn-corregir');
+      if (btnCorregir) return abrirCorregir(btnCorregir.dataset.id);
+
+      const btnEnviar = e.target.closest('.btn-enviar');
+      if (!btnEnviar) return;
+      const id = btnEnviar.dataset.id;
+      btnEnviar.disabled = true;
+      btnEnviar.textContent = '...';
+      try {
+        const r = await fetch(`/admin/enviar/${id}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+          body: '{}'
+        });
+        const d = await r.json();
+        if (!r.ok || !d.ok) throw new Error(d.error || 'Error');
+        const enviado = !!(d.correo && d.correo.ok);
+        if (enviado) falloEnvio.delete(id);
+        else falloEnvio.add(id);
+        toast(
+          enviado
+            ? 'PDF generado y enviado al e-mail del alumno.'
+            : `PDF generado, correo NO enviado${d.correo && d.correo.error ? ': ' + d.correo.error : ''}.`,
+          enviado ? 'ok' : 'err'
+        );
+        await refrescar();
+      } catch (err) {
+        toast('No se pudo enviar: ' + err.message, 'err');
+        btnEnviar.disabled = false;
+        btnEnviar.textContent = 'Enviar';
+      }
     });
 
     btnGuardarCorr.addEventListener('click', async () => {
       if (!corrId) return;
       btnGuardarCorr.disabled = true;
       btnGuardarCorr.textContent = '...';
+
+      const puntajes = {};
+      corrLista.querySelectorAll('.corr-nota').forEach((inp) => {
+        if (String(inp.value).trim() !== '') puntajes[inp.dataset.pid] = String(inp.value).trim();
+      });
+      const devsPorPregunta = {};
+      corrLista.querySelectorAll('.corr-devolucion').forEach((ta) => {
+        if (ta.value.trim() !== '') devsPorPregunta[ta.dataset.pid] = ta.value.trim();
+      });
+
       try {
-        const r = await fetch(`/admin/devoluciones/${corrId}`, {
+        const r = await fetch(`/admin/corregir/${idDeCorreccion()}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-          body: JSON.stringify({ devoluciones: corrTexto.value })
+          body: JSON.stringify({
+            puntajes,
+            devoluciones: devsPorPregunta,
+            devolucion_general: corrGeneral.value
+          })
         });
         const d = await r.json();
         if (!r.ok || !d.ok) throw new Error(d.error || 'Error');
-        devoluciones[corrId] = d.devoluciones || '';
-        const idCorr = corrId;
-        let extra;
-        if (Number(d.pdf_enviado) !== 1) {
-          extra = ' (el PDF se generara al calificar).';
-        } else if (d.correo && d.correo.ok) {
-          falloEnvio.delete(idCorr);
-          extra = ' — PDF reenviado por correo.';
-        } else {
-          falloEnvio.add(idCorr);
-          extra = ` — PDF regenerado, correo NO enviado${d.correo && d.correo.error ? ': ' + d.correo.error : ''}.`;
-        }
-        toast(
-          (d.devoluciones ? 'Correcciones guardadas.' : 'Correcciones borradas.') + extra,
-          d.correo && d.correo.error ? 'err' : 'ok'
-        );
+        const extra =
+          Number(d.pdf_enviado) === 1
+            ? d.correo && d.correo.ok
+              ? ' — PDF reenviado al alumno.'
+              : ' — PDF regenerado, correo NO enviado.'
+            : ' (el PDF se genera al pulsar Enviar).';
+        toast(`Correccion guardada. Total: ${d.puntaje_total_obtenido} pts` + extra, 'ok');
         cerrarCorreccion();
         await refrescar();
       } catch (err) {
-        toast('No se pudieron guardar las correcciones: ' + err.message, 'err');
+        toast('No se pudo guardar la correccion: ' + err.message, 'err');
       } finally {
         btnGuardarCorr.disabled = false;
         btnGuardarCorr.textContent = 'Guardar';
       }
     });
+
+    function idDeCorreccion() {
+      return corrId;
+    }
 
     aplicarFiltros();
   }
