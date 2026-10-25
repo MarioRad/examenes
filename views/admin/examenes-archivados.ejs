@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Admin - Archivados</title>
+  <link rel="stylesheet" href="/css/styles.css" />
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+</head>
+<body class="page-admin page-archivados">
+
+  <header class="admin-topbar">
+    <div class="at-left">
+      <span class="logo-mini">A</span>
+      <div>
+        <b>Archivados</b>
+        <span class="muted">Examenes archivados (sin borrado)</span>
+      </div>
+    </div>
+    <nav class="at-nav">
+      <a href="/admin/panel" class="btn btn-ghost">Panel</a>
+      <a href="/admin/examenes" class="btn btn-ghost">Examenes</a>
+      <a href="/admin/examenes/archivados" class="btn btn-ghost activo">Archivados</a>
+      <a href="/admin/alumnos" class="btn btn-ghost">Alumnos</a>
+      <a href="/admin/instituciones" class="btn btn-ghost">Instituciones</a>
+      <form method="POST" action="/admin/logout" style="display:inline">
+        <button type="submit" class="btn btn-ghost">Salir</button>
+      </form>
+    </nav>
+  </header>
+
+  <main class="admin-main">
+    <% if (ok) { %><div class="alert alert-ok"><%= ok %></div><% } %>
+    <% if (error) { %><div class="alert alert-error"><%= error %></div><% } %>
+
+    <section class="card-tabla">
+      <div class="tabla-titulo">
+        <h1>Examenes archivados</h1>
+      </div>
+      <div class="scroll-tabla">
+        <table class="tabla">
+          <thead>
+            <tr>
+              <th>Materia</th>
+              <th>Nombre</th>
+              <th>Duracion</th>
+              <th>Ventana</th>
+              <th>Accion</th>
+            </tr>
+          </thead>
+          <tbody>
+            <% examenes.forEach(function(e) { %>
+              <tr>
+                <td><%= (e.institucion_nombre ? e.institucion_nombre + ' / ' : '') + e.materia_nombre %></td>
+                <td><b><%= e.nombre %></b></td>
+                <td><%= e.duracion_minutos %> min</td>
+                <td class="muted"><%= e.disponible_desde && e.disponible_hasta ? e.disponible_desde + ' al ' + e.disponible_hasta : '—' %></td>
+                <td class="c-acciones">
+                  <form method="POST" action="/admin/examenes/<%= e.id %>/restaurar" class="form-borrar" style="display:inline" onclick="return confirm('Restaurar este examen? Volvera al listado principal.')">
+                    <button type="submit" class="btn btn-sm btn-guardar">Restaurar</button>
+                  </form>
+                </td>
+              </tr>
+            <% }) %>
+          </tbody>
+        </table>
+      </div>
+      <% if (examenes.length === 0) { %>
+        <div class="alert alert-ok" style="margin-top:12px">No hay examenes archivados.</div>
+      <% } %>
+    </section>
+  </main>
+
+  <script src="/js/admin.js"></script>
+</body>
+</html>

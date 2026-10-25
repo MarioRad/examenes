@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Admin - Examenes</title>
+  <link rel="stylesheet" href="/css/styles.css" />
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+</head>
+<body class="page-admin page-examenes">
+
+  <header class="admin-topbar">
+    <div class="at-left">
+      <span class="logo-mini">E</span>
+      <div>
+        <b>Examenes</b>
+        <span class="muted">Institucion &rarr; Materia &rarr; Examen</span>
+      </div>
+    </div>
+    <nav class="at-nav">
+      <a href="/admin/panel" class="btn btn-ghost">Panel</a>
+      <a href="/admin/examenes" class="btn btn-ghost activo">Examenes</a>
+      <a href="/admin/alumnos" class="btn btn-ghost">Alumnos</a>
+      <a href="/admin/instituciones" class="btn btn-ghost">Instituciones</a>
+      <a href="/admin/examenes/archivados" class="btn btn-ghost">Archivados</a>
+      <form method="POST" action="/admin/logout" style="display:inline">
+        <button type="submit" class="btn btn-ghost">Salir</button>
+      </form>
+    </nav>
+  </header>
+
+  <main class="admin-main">
+    <% if (ok) { %><div class="alert alert-ok"><%= ok %></div><% } %>
+    <% if (error) { %><div class="alert alert-error"><%= error %></div><% } %>
+
+    <section class="card-tabla" style="margin-bottom:18px">
+      <div class="tabla-titulo">
+        <h1>Examenes</h1>
+        <div class="filtros" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+          <form method="GET" action="/admin/examenes" style="margin:0">
+            <select name="materia" id="filtroMateria" style="padding:8px 10px;border-radius:10px;border:1px solid var(--line);background:var(--bg-2);color:var(--txt)">
+              <option value="">Todas las materias</option>
+              <% materias.forEach(function(m) { %>
+                <option value="<%= m.id %>" <%= materiaSel === m.id ? 'selected' : '' %>>
+                  <%= (m.institucion_nombre ? m.institucion_nombre + ' / ' : '') + m.nombre %>
+                </option>
+              <% }) %>
+            </select>
+            <button type="submit" class="btn btn-sm btn-primary">Filtrar</button>
+            <% if (materiaSel) { %>
+              <a href="/admin/examenes" class="btn btn-sm btn-ghost">Limpiar</a>
+            <% } %>
+          </form>
+          <a href="#formExamen" class="btn btn-primary">Nuevo examen</a>
+        </div>
+      </div>
+    </section>
+
+    <section id="formExamen" class="card-form" style="margin-bottom:18px">
+      <h2>Nuevo examen</h2>
+      <form method="POST" action="/admin/examenes">
+        <label for="materia_id">Materia</label>
+        <select id="materia_id" name="materia_id" required>
+          <option value="">-- elegir materia --</option>
+          <% materias.forEach(function(m) { %>
+            <option value="<%= m.id %>">
+              <%= (m.institucion_nombre ? m.institucion_nombre + ' / ' : '') + m.nombre %>
+            </option>
+          <% }) %>
+        </select>
+
+        <label for="nombre">Nombre del examen</label>
+        <input type="text" id="nombre" name="nombre" required placeholder="Ej: Parcial 1 - Programacion" />
+
+        <div class="dos-col">
+          <div>
+            <label for="duracion_minutos">Duracion (minutos)</label>
+            <input type="number" id="duracion_minutos" name="duracion_minutos" min="1" max="1440" value="60" required />
+          </div>
+          <div>
+            <label for="disponible_desde">Disponible desde</label>
+            <input type="datetime-local" id="disponible_desde" name="disponible_desde" required />
+          </div>
+        </div>
+        <div class="dos-col">
+          <div>
+            <label for="disponible_hasta">Disponible hasta</label>
+            <input type="datetime-local" id="disponible_hasta" name="disponible_hasta" required />
+          </div>
+          <div style="display:flex;align-items:end">
+            <button type="submit" class="btn btn-primary">Crear examen</button>
+          </div>
+        </div>
+      </form>
+    </section>
+
+    <section class="card-tabla">
+      <div class="tabla-titulo">
+        <h1>Listado de examenes</h1>
+      </div>
+      <div class="scroll-tabla">
+        <table class="tabla">
+          <thead>
+            <tr>
+              <th>Materia</th>
+              <th>Nombre</th>
+              <th>Duracion</th>
+              <th>Ventana</th>
+              <th>Publicado</th>
+              <th>Archivado</th>
+              <th>Preguntas</th>
+              <th>Alumnos</th>
+              <th>Entregas</th>
+              <th>Acciones</th>
+            </tr>
+          </thead>
+          <tbody>
+            <% examenes.forEach(function(e) { %>
+              <tr>
+                <td><%= (e.institucion_nombre ? e.institucion_nombre + ' / ' : '') + e.materia_nombre %></td>
+                <td><b><%= e.nombre %></b></td>
+                <td><%= e.duracion_minutos %> min</td>
+                <td class="muted"><%= e.disponible_desde && e.disponible_hasta ? e.disponible_desde + ' al ' + e.disponible_hasta : '—' %></td>
+                <td><span class="badge <%= e.publicado ? 'ok' : 'err' %>"><%= e.publicado ? 'SI' : 'NO' %></span></td>
+                <td><span class="badge <%= e.archivado ? 'err' : 'muted' %>"><%= e.archivado ? 'SI' : 'NO' %></span></td>
+                <td><%= e.preguntas %></td>
+                <td><%= e.alumnos %></td>
+                <td><%= e.entregas %></td>
+                <td class="c-acciones">
+                  <% if (!e.archivado) { %>
+                    <% if (!e.publicado) { %>
+                      <form method="POST" action="/admin/examenes/<%= e.id %>/publicar" class="form-borrar" style="display:inline" onclick="return confirm('Publicar este examen? Solo puede haber uno publicado por materia.')">
+                        <button type="submit" class="btn btn-sm btn-guardar">Publicar</button>
+                      </form>
+                    <% } else { %>
+                      <form method="POST" action="/admin/examenes/<%= e.id %>/despublicar" class="form-borrar" style="display:inline" onclick="return confirm('Despublicar este examen?')">
+                        <button type="submit" class="btn btn-sm btn-ghost">Despublicar</button>
+                      </form>
+                    <% } %>
+                    <form method="POST" action="/admin/examenes/<%= e.id %>/archivar" class="form-borrar" style="display:inline" onclick="return confirm('Archivar este examen? Pasara a Archivados.')">
+                      <button type="submit" class="btn btn-sm btn-danger">Archivar</button>
+                    </form>
+                    <a href="/admin/examenes/<%= e.id %>" class="btn btn-sm btn-ghost">Detalle</a>
+                  <% } %>
+                </td>
+              </tr>
+            <% }) %>
+          </tbody>
+        </table>
+      </div>
+      <% if (examenes.length === 0) { %>
+        <div class="alert alert-error" style="margin-top:12px">No hay examenes. Crea uno arriba.</div>
+      <% } %>
+    </section>
+  </main>
+
+  <script src="/js/admin.js"></script>
+</body>
+</html>

@@ -97,7 +97,7 @@ function requiereAlumno(req, res, next) {
 
 /** Para la vista del examen: si ya entrego, no vuelve a entrar. */
 async function bloqueaSiYaEntrego(req, res, next) {
-  const entrega = await stmts.getRespuestaByAlumno.get(req.session.alumno.documento);
+  const entrega = await stmts.getRespuestaByAlumnoExamen.get(req.session.alumno.documento, req.session.examen_id);
   if (entrega) {
     return renderLogin(res, {
       error: 'Ya entregaste tu examen. Solo se permite un único intento.',
@@ -161,6 +161,12 @@ app.post('/login', async (req, res) => {
     return renderLogin(res, { error: ventanaMateria.motivo, documento });
   }
 
+  // 3) Examen asignado al alumno (publicado, no archivado, de su materia)
+  const examenAlumno = await stmtsExamenes.examenesDelAlumno.get(documento);
+  if (!examenAlumno) {
+    return renderLogin(res, { error: 'No tienes un examen asignado. Consulta con tu profesor.', documento });
+  }
+
   const inicio = Date.now();
   // Tiempo de resolucion propio del examen, recortado si la ventana cierra antes.
   const minutosVentana = minutosHastaVentana(alumno, tsServidor());
@@ -172,6 +178,7 @@ app.post('/login', async (req, res) => {
   req.session.regenerate((err) => {
     if (err) return res.status(500).send('Error de sesion.');
     req.session.alumno = { documento: alumno.documento, nombre: alumno.nombre };
+    req.session.examen_id = examenAlumno.id;
     req.session.inicio = inicio;
     req.session.fin = fin;
     req.session.abandonos = 0;
@@ -189,7 +196,8 @@ app.post('/logout', (req, res) => {
 
 app.get('/examen', requiereAlumno, bloqueaSiYaEntrego, async (req, res) => {
   const alumno = await stmts.getAlumno.get(req.session.alumno.documento);
-  const preguntas = alumno ? await stmts.preguntasDeMateria.all(alumno.materia_id || 0) : [];
+  const examenId = req.session.examen_id;
+  const preguntas = examenId ? await stmtsExamenes.preguntasDeExamen.all(examenId) : [];
 
   const enRango = req.session.fin - Date.now();
   const restante = Math.max(0, Math.min(duracionExamenMs(alumno), enRango));
@@ -225,9 +233,10 @@ app.post('/api/abandono', (req, res) => {
  */
 app.post('/entregar', requiereAlumno, async (req, res) => {
   const documento = req.session.alumno.documento;
+  const examenId = req.session.examen_id;
   const alumno = await stmts.getAlumno.get(documento);
 
-  if (await stmts.getRespuestaByAlumno.get(documento)) {
+  if (await stmts.getRespuestaByAlumnoExamen.get(documento, examenId)) {
     return res.status(409).json({ ok: false, error: 'Ya entregaste tu examen.' });
   }
 
@@ -250,7 +259,7 @@ app.post('/entregar', requiereAlumno, async (req, res) => {
     if (Number.isInteger(n)) respuestas[n] = bruto[k];
   }
 
-  const preguntas = await stmts.preguntasDeMateria.all(alumno.materia_id || 0);
+  const preguntas = await stmtsExamenes.preguntasDeExamen.all(examenId);
 
   // Mientras quede tiempo, no se puede entregar sin responder las obligatorias.
   if (!expulsado && ahora <= req.session.fin) {
@@ -282,6 +291,7 @@ app.post('/entregar', requiereAlumno, async (req, res) => {
     documento_alumno: documento,
     nombre_alumno: alumno.nombre,
     materia_id: alumno.materia_id || null,
+    examen_id: examenId,
     respuestas_json: JSON.stringify(respuestas),
     puntaje_choice: choice,
     puntaje_desarrollo: 0,
@@ -296,6 +306,7 @@ app.post('/entregar', requiereAlumno, async (req, res) => {
       fila.documento_alumno,
       fila.nombre_alumno,
       fila.materia_id,
+      fila.examen_id,
       fila.respuestas_json,
       fila.puntaje_choice,
       fila.puntaje_desarrollo,
@@ -312,7 +323,7 @@ app.post('/entregar', requiereAlumno, async (req, res) => {
     return res.status(500).json({ ok: false, error: 'Error al guardar.' });
   }
 
-  const entrega = await stmts.getRespuestaByAlumno.get(documento);
+  const entrega = await stmts.getRespuestaByAlumnoExamen.get(documento, examenId);
 
   // El temporizador/avisos de la sesion ya no sirven.
   delete req.session.fin;
@@ -1076,6 +1087,275 @@ app.post('/admin/alumnos/:documento/borrar', requiereAdmin, async (req, res) => 
 });
 
 /* ------------------------------------------------------------------ */
+/*  CRUD DE EXAMENES                                                  */
+/* ------------------------------------------------------------------ */
+
+/** 'YYYY-MM-DDTHH:MM' (input datetime-local) -> 'YYYY-MM-DD HH:MM'. */
+function normalizarFechaHoraExamen(valor) {
+  const s = String(valor == null ? '' : valor).trim();
+  if (!s) return null;
+  const m = /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})/.exec(s);
+  if (!m) return undefined;
+  return `${m[1]}-${m[2]}-${m[3]} ${m[4]}:${m[5]}`;
+}
+
+function leerExamenForm(body) {
+  const nombre = String(body.nombre || '').trim();
+  if (!nombre) throw new Error('El nombre del examen es obligatorio.');
+  if (nombre.length > 120) throw new Error('Nombre demasiado largo (max 120).');
+
+  const materia_id = Number(body.materia_id) || 0;
+  if (!(stmts.getMateria.get(materia_id))) throw new Error('Elegi una materia.');
+
+  const duracion = Number(body.duracion_minutos);
+  if (!Number.isFinite(duracion) || duracion < 1 || duracion > 24 * 60) {
+    throw new Error('Duracion invalida (1 a 1440 minutos).');
+  }
+
+  const desde = normalizarFechaHoraExamen(body.disponible_desde);
+  const hasta = normalizarFechaHoraExamen(body.disponible_hasta);
+  if (desde === undefined || hasta === undefined) {
+    throw new Error('Fecha y hora invalidas.');
+  }
+  if (desde && hasta && hasta <= desde) {
+    throw new Error('El fin de la ventana debe ser posterior al inicio.');
+  }
+
+  return { nombre, materia_id, duracion_minutos: duracion, disponible_desde: desde || null, disponible_hasta: hasta || null };
+}
+
+/** Lista de examenes (no archivados) con datos de materia e institucion. */
+app.get('/admin/examenes', requiereAdmin, async (req, res) => {
+  const materiaSel = Number(req.query.materia) || 0;
+  let examenes = await stmtsExamenes.listarExamenes.all();
+  examenes = examenes.filter((e) => e.archivado === 0);
+  if (materiaSel) examenes = examenes.filter((e) => e.materia_id === materiaSel);
+  const materias = await stmts.listarMaterias.all();
+  res.render('admin/examenes', {
+    examenes,
+    materias,
+    materiaSel,
+    archivados: false,
+    ok: req.query.ok || null,
+    error: req.query.error || null
+  });
+});
+
+/** Lista de examenes archivados. */
+app.get('/admin/examenes/archivados', requiereAdmin, async (req, res) => {
+  const examenes = await stmtsExamenes.listarExamenesArchivados.all();
+  const materias = await stmts.listarMaterias.all();
+  res.render('admin/examenes-archivados', {
+    examenes,
+    materias,
+    ok: req.query.ok || null,
+    error: req.query.error || null
+  });
+});
+
+/** Crear examen. */
+app.post('/admin/examenes', requiereAdmin, async (req, res) => {
+  try {
+    const e = leerExamenForm(req.body);
+    await stmtsExamenes.crearExamen.run(
+      e.materia_id, e.nombre, e.duracion_minutos,
+      e.disponible_desde, e.disponible_hasta
+    );
+    res.redirect('/admin/examenes?ok=Examen+creado');
+  } catch (err) {
+    res.redirect(`/admin/examenes?error=${encodeURIComponent(err.message)}`);
+  }
+});
+
+/** Editar examen. */
+app.post('/admin/examenes/:id/editar', requiereAdmin, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!(await stmtsExamenes.getExamen.get(id))) throw new Error('Examen inexistente.');
+    const e = leerExamenForm(req.body);
+    await stmtsExamenes.editarExamen.run(
+      e.nombre, e.duracion_minutos, e.disponible_desde, e.disponible_hasta, id
+    );
+    res.redirect('/admin/examenes?ok=Examen+actualizado');
+  } catch (err) {
+    res.redirect(`/admin/examenes?error=${encodeURIComponent(err.message)}`);
+  }
+});
+
+/** Publicar examen (despublica otros de la misma materia). */
+app.post('/admin/examenes/:id/publicar', requiereAdmin, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const examen = await stmtsExamenes.getExamen.get(id);
+    if (!examen) throw new Error('Examen inexistente.');
+    await stmtsExamenes.despublicarOtrosDeMateria.run(examen.materia_id);
+    await stmtsExamenes.publicarExamen.run(1, id);
+    res.redirect('/admin/examenes?ok=Examen+publicado');
+  } catch (err) {
+    res.redirect(`/admin/examenes?error=${encodeURIComponent(err.message)}`);
+  }
+});
+
+/** Despublicar examen. */
+app.post('/admin/examenes/:id/despublicar', requiereAdmin, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!(await stmtsExamenes.getExamen.get(id))) throw new Error('Examen inexistente.');
+    await stmtsExamenes.despublicarExamen.run(id);
+    res.redirect('/admin/examenes?ok=Examen+despublicado');
+  } catch (err) {
+    res.redirect(`/admin/examenes?error=${encodeURIComponent(err.message)}`);
+  }
+});
+
+/** Archivar examen (pasa a Archivados, no se borra). */
+app.post('/admin/examenes/:id/archivar', requiereAdmin, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!(await stmtsExamenes.getExamen.get(id))) throw new Error('Examen inexistente.');
+    await stmtsExamenes.archivarExamen.run(id);
+    res.redirect('/admin/examenes?ok=Examen+archivado');
+  } catch (err) {
+    res.redirect(`/admin/examenes?error=${encodeURIComponent(err.message)}`);
+  }
+});
+
+/** Restaurar examen desde Archivados. */
+app.post('/admin/examenes/:id/restaurar', requiereAdmin, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!(await stmtsExamenes.getExamen.get(id))) throw new Error('Examen inexistente.');
+    await stmtsExamenes.restaurarExamen.run(id);
+    res.redirect('/admin/examenes/archivados?ok=Examen+restaurado');
+  } catch (err) {
+    res.redirect(`/admin/examenes/archivados?error=${encodeURIComponent(err.message)}`);
+  }
+});
+
+
+/** Ver detalle de un examen: alumnos asignados y disponibles para asignar. */
+app.get('/admin/examenes/:id', requiereAdmin, async (req, res) => {
+  const id = Number(req.params.id);
+  const examen = await stmtsExamenes.getExamen.get(id);
+  if (!examen) return res.status(404).send('Examen inexistente.');
+  const asignados = await stmtsExamenes.alumnosAsignadosAlExamen.all(id);
+  const disponibles = await stmtsExamenes.alumnosParaAsignar.all(examen.materia_id);
+  const asignadosDocs = new Set(asignados.map((a) => a.documento));
+  const preguntas = await stmtsExamenes.preguntasDeExamen.all(id);
+  res.render('admin/examen-detalle', {
+    examen,
+    asignados,
+    disponibles: disponibles.filter((a) => !asignadosDocs.has(a.documento)),
+    preguntas,
+    ok: req.query.ok || null,
+    error: req.query.error || null
+  });
+});
+
+/** Asignar un alumno al examen. */
+app.post('/admin/examenes/:id/asignar-alumno', requiereAdmin, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const documento = String(req.body.documento_alumno || '').trim();
+    if (!documento) throw new Error('Documento requerido.');
+    if (!(await stmtsExamenes.getExamen.get(id))) throw new Error('Examen inexistente.');
+    const alumno = await stmts.getAlumno.get(documento);
+    if (!alumno) throw new Error('Alumno inexistente.');
+    await stmtsExamenes.asignarAlumno.run(id, documento);
+    res.redirect(`/admin/examenes/${id}?ok=Alumno+asignado`);
+  } catch (err) {
+    res.redirect(`/admin/examenes/${req.params.id}?error=${encodeURIComponent(err.message)}`);
+  }
+});
+
+/** Desasignar un alumno del examen. */
+app.post('/admin/examenes/:id/desasignar-alumno', requiereAdmin, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const documento = String(req.body.documento_alumno || '').trim();
+    await stmtsExamenes.desasignarAlumno.run(id, documento);
+    res.redirect(`/admin/examenes/${id}?ok=Alumno+desasignado`);
+  } catch (err) {
+    res.redirect(`/admin/examenes/${req.params.id}?error=${encodeURIComponent(err.message)}`);
+  }
+});
+
+/** Crear pregunta dentro de un examen. */
+app.post('/admin/examenes/:id/preguntas', requiereAdmin, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!(await stmtsExamenes.getExamen.get(id))) throw new Error('Examen inexistente.');
+    const texto = String(req.body.texto || '').trim();
+    const tipo = req.body.tipo === 'choice' ? 'choice' : 'desarrollo';
+    const puntos = puntaje(req.body.puntos);
+    const materia_id = Number(req.body.materia_id) || 0;
+    const obligatoria = req.body.obligatoria === '1' || req.body.obligatoria === 'on' ? 1 : 0;
+    if (!texto) throw new Error('El texto de la pregunta es obligatorio.');
+    if (!materia_id) throw new Error('Materia invalida.');
+    let opciones_json = null;
+    let respuesta_correcta = null;
+    if (tipo === 'choice') {
+      const lineas = String(req.body.opciones || '').split('\n').map((s) => s.trim()).filter(Boolean);
+      if (lineas.length < 2) throw new Error('Una pregunta choice necesita al menos 2 opciones.');
+      const correctas = String(req.body.correctas || '').split(/[\s,;]+/).filter(Boolean)
+        .map((n) => parseInt(n, 10) - 1).filter((n) => Number.isInteger(n) && n >= 0 && n < lineas.length);
+      if (correctas.length === 0) throw new Error('Marca al menos una respuesta correcta.');
+      opciones_json = JSON.stringify(lineas);
+      respuesta_correcta = JSON.stringify([...new Set(correctas)].sort((a, b) => a - b));
+    }
+    await stmtsExamenes.crearPreguntaExamen.run(
+      texto, tipo, opciones_json, respuesta_correcta, puntos, obligatoria, materia_id, id
+    );
+    res.redirect(`/admin/examenes/${id}?ok=Pregunta+creada`);
+  } catch (err) {
+    res.redirect(`/admin/examenes/${req.params.id}?error=${encodeURIComponent(err.message)}`);
+  }
+});
+
+/** Editar pregunta de un examen. */
+app.post('/admin/examenes/:id/preguntas/:pid/editar', requiereAdmin, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const pid = Number(req.params.pid);
+    if (!(await stmtsExamenes.getExamen.get(id))) throw new Error('Examen inexistente.');
+    const texto = String(req.body.texto || '').trim();
+    const tipo = req.body.tipo === 'choice' ? 'choice' : 'desarrollo';
+    const puntos = puntaje(req.body.puntos);
+    const materia_id = Number(req.body.materia_id) || 0;
+    const obligatoria = req.body.obligatoria === '1' || req.body.obligatoria === 'on' ? 1 : 0;
+    if (!texto) throw new Error('El texto de la pregunta es obligatorio.');
+    if (!materia_id) throw new Error('Materia invalida.');
+    let opciones_json = null;
+    let respuesta_correcta = null;
+    if (tipo === 'choice') {
+      const lineas = String(req.body.opciones || '').split('\n').map((s) => s.trim()).filter(Boolean);
+      if (lineas.length < 2) throw new Error('Una pregunta choice necesita al menos 2 opciones.');
+      const correctas = String(req.body.correctas || '').split(/[\s,;]+/).filter(Boolean)
+        .map((n) => parseInt(n, 10) - 1).filter((n) => Number.isInteger(n) && n >= 0 && n < lineas.length);
+      if (correctas.length === 0) throw new Error('Marca al menos una respuesta correcta.');
+      opciones_json = JSON.stringify(lineas);
+      respuesta_correcta = JSON.stringify([...new Set(correctas)].sort((a, b) => a - b));
+    }
+    await stmtsExamenes.editarPreguntaExamen.run(
+      texto, tipo, opciones_json, respuesta_correcta, puntos, obligatoria, materia_id, id, pid
+    );
+    res.redirect(`/admin/examenes/${id}?ok=Pregunta+actualizada`);
+  } catch (err) {
+    res.redirect(`/admin/examenes/${req.params.id}?error=${encodeURIComponent(err.message)}`);
+  }
+});
+
+/** Borrar pregunta de un examen. */
+app.post('/admin/examenes/:id/preguntas/:pid/borrar', requiereAdmin, async (req, res) => {
+  try {
+    const pid = Number(req.params.pid);
+    const id = Number(req.params.id);
+    await stmts.borrarPregunta.run(pid);
+    res.redirect(`/admin/examenes/${id}?ok=Pregunta+borrada`);
+  } catch (err) {
+    res.redirect(`/admin/examenes/${req.params.id}?error=${encodeURIComponent(err.message)}`);
+  }
+});
 
 app.use((req, res) => {
   res.status(404).send('No encontrado.');

@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Admin - Detalle Examen</title>
+  <link rel="stylesheet" href="/css/styles.css" />
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+</head>
+<body class="page-admin page-examen-detalle">
+
+  <header class="admin-topbar">
+    <div class="at-left">
+      <span class="logo-mini">E</span>
+      <div>
+        <b>Examen: <%= examen.nombre %></b>
+        <span class="muted"><%= (examen.institucion_nombre ? examen.institucion_nombre + ' / ' : '') + examen.materia_nombre %></span>
+      </div>
+    </div>
+    <nav class="at-nav">
+      <a href="/admin/examenes" class="btn btn-ghost">Volver a examenes</a>
+      <a href="/admin/examenes/archivados" class="btn btn-ghost">Archivados</a>
+      <form method="POST" action="/admin/logout" style="display:inline">
+        <button type="submit" class="btn btn-ghost">Salir</button>
+      </form>
+    </nav>
+  </header>
+
+  <main class="admin-main">
+    <% if (ok) { %><div class="alert alert-ok"><%= ok %></div><% } %>
+    <% if (error) { %><div class="alert alert-error"><%= error %></div><% } %>
+
+    <section class="card-tabla" style="margin-bottom:18px">
+      <div class="tabla-titulo">
+        <h1>Detalle del examen</h1>
+      </div>
+      <div class="dos-col">
+        <div>
+          <label class="muted">Nombre</label>
+          <div style="font-size:1.1rem;font-weight:600"><%= examen.nombre %></div>
+        </div>
+        <div>
+          <label class="muted">Materia</label>
+          <div><%= (examen.institucion_nombre ? examen.institucion_nombre + ' / ' : '') + examen.materia_nombre %></div>
+        </div>
+        <div>
+          <label class="muted">Duracion</label>
+          <div><%= examen.duracion_minutos %> minutos</div>
+        </div>
+        <div>
+          <label class="muted">Ventana</label>
+          <div class="muted"><%= examen.disponible_desde && examen.disponible_hasta ? examen.disponible_desde + ' al ' + examen.disponible_hasta : '—' %></div>
+        </div>
+        <div>
+          <label class="mested">Estado</label>
+          <div>
+            <span class="badge <%= examen.publicado ? 'ok' : 'err' %>"><%= examen.publicado ? 'Publicado' : 'No publicado' %></span>
+            <span class="badge <%= examen.archivado ? 'err' : 'muted' %>"><%= examen.archivado ? 'Archivado' : 'Activo' %></span>
+          </div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:8px;justify-content:flex-end">
+          <% if (!examen.archivado) { %>
+            <% if (!examen.publicado) { %>
+              <form method="POST" action="/admin/examenes/<%= examen.id %>/publicar" style="display:inline" onclick="return confirm('Publicar este examen? Solo puede haber uno publicado por materia.')">
+                <button type="submit" class="btn btn-sm btn-guardar">Publicar examen</button>
+              </form>
+            <% } else { %>
+              <form method="POST" action="/admin/examenes/<%= examen.id %>/despublicar" style="display:inline" onclick="return confirm('Despublicar este examen?')">
+                <button type="submit" class="btn btn-sm btn-ghost">Despublicar examen</button>
+              </form>
+            <% } %>
+            <form method="POST" action="/admin/examenes/<%= examen.id %>/archivar" style="display:inline" onclick="return confirm('Archivar este examen? Pasara a Archivados.')">
+              <button type="submit" class="btn btn-sm btn-danger">Archivar examen</button>
+            </form>
+          <% } %>
+        </div>
+      </div>
+    </section>
+
+    <!-- Alumnos asignados -->
+    <section class="card-tabla" style="margin-bottom:18px">
+      <div class="tabla-titulo">
+        <h1>Alumnos asignados (<%= asignados.length %>)</h1>
+      </div>
+      <div class="scroll-tabla">
+        <table class="tabla">
+          <thead>
+            <tr>
+              <th>Documento</th>
+              <th>Nombre</th>
+              <th>Email</th>
+              <th>Entregado</th>
+              <th>Nota</th>
+              <th>Accion</th>
+            </tr>
+          </thead>
+          <tbody>
+            <% asignados.forEach(function(a) { %>
+              <tr>
+                <td><%= a.documento %></td>
+                <td><%= a.nombre %></td>
+                <td><%= a.email %></td>
+                <td><span class="badge <%= a.respuesta_id ? 'ok' : 'muted' %>"><%= a.respuesta_id ? 'SI' : 'NO' %></span></td>
+                <td><%= a.puntaje_total_obtenido != null ? a.puntaje_total_obtenido : '—' %></td>
+                <td class="c-acciones">
+                  <form method="POST" action="/admin/examenes/<%= examen.id %>/desasignar-alumno" style="display:inline" onclick="return confirm('Desasignar a <%= a.nombre ?> de este examen?')">
+                    <input type="hidden" name="documento_alumno" value="<%= a.documento %>" />
+                    <button type="submit" class="btn btn-sm btn-danger">Desasignar</button>
+                  </form>
+                </td>
+              </tr>
+            <% }) %>
+          </tbody>
+        </table>
+      </div>
+      <% if (asignados.length === 0) { %>
+        <div class="alert alert-error" style="margin-top:12px">No hay alumnos asignados a este examen.</div>
+      <% } %>
+    </section>
+
+    <!-- Alumnos disponibles para asignar -->
+    <section class="card-tabla" style="margin-bottom:18px">
+      <div class="tabla-titulo">
+        <h1>Asignar alumno</h1>
+      </div>
+      <% if (disponibles.length === 0) { %>
+        <div class="alert alert-ok" style="margin-top:12px">Todos los alumnos de esta materia ya estan asignados.</div>
+      <% } else { %>
+        <form method="POST" action="/admin/examenes/<%= examen.id %>/asignar-alumno">
+          <label for="documento_alumno">Elegi un alumno de la materia</label>
+          <select id="documento_alumno" name="documento_alumno" required style="width:100%;padding:11px 12px;border-radius:10px;border:1px solid var(--line);background:var(--bg-2);color:var(--txt)">
+            <option value="">-- elegir alumno --</option>
+            <% disponibles.forEach(function(a) { %>
+              <option value="<%= a.documento %>"><%= a.documento %> - <%= a.nombre %></option>
+            <% }) %>
+          </select>
+          <div class="acciones-form" style="margin-top:12px">
+            <button type="submit" class="btn btn-primary">Asignar al examen</button>
+          </div>
+        </form>
+      <% } %>
+    </section>
+
+    <!-- Preguntas del examen -->
+    <section class="card-tabla">
+      <div class="tabla-titulo">
+        <h1>Preguntas del examen (<%= preguntas.length %>)</h1>
+      </div>
+      <form method="POST" action="/admin/examenes/<%= examen.id %>/preguntas">
+        <label for="texto">Enunciado</label>
+        <textarea id="texto" name="texto" rows="3" required placeholder="Escribe la pregunta..."></textarea>
+        <div class="dos-col">
+          <div>
+            <label for="tipo">Tipo</label>
+            <select id="tipo" name="tipo" required>
+              <option value="desarrollo" selected>Desarrollo</option>
+              <option value="choice">Choice (opcion multiple)</option>
+            </select>
+          </div>
+          <div>
+            <label for="puntos">Puntos</label>
+            <input type="number" id="puntos" name="puntos" min="0" step="0.01" value="3" required />
+          </div>
+        </div>
+        <label class="check-obligatoria">
+          <input type="checkbox" name="obligatoria" value="1" />
+          Pregunta obligatoria
+        </label>
+        <div id="bloqueChoice" style="margin-top:12px">
+          <label for="opciones">Opciones (una por linea)</label>
+          <textarea id="opciones" name="opciones" rows="3" placeholder="Opcion A&#10;Opcion B&#10;Opcion C"></textarea>
+          <label for="correctas">Correcta(s) (numeros 1-based, separados por coma)</label>
+          <input type="text" id="correctas" name="correctas" placeholder="Ej: 1, 3" />
+        </div>
+        <input type="hidden" name="materia_id" value="<%= examen.materia_id %>" />
+        <div class="acciones-form" style="margin-top:12px">
+          <button type="submit" class="btn btn-primary">Agregar pregunta</button>
+        </div>
+      </form>
+
+      <% if (preguntas.length > 0) { %>
+        <ul class="lista-preguntas" style="margin-top:16px">
+          <% preguntas.forEach(function(p) { %>
+            <li class="item-pregunta">
+              <div class="ip-head">
+                <strong><%= p.texto %></strong>
+                <span class="badge <%= p.tipo === 'choice' ? 'info' : 'muted' %>"><%= p.tipo === 'choice' ? 'Choice' : 'Desarrollo' %></span>
+                <span class="badge <%= p.obligatoria ? 'ok' : 'muted' %>"><%= p.obligatoria ? 'Obligatoria' : '' %></span>
+                <span class="badge"><%= p.puntos %> pts</span>
+              </div>
+              <% if (p.tipo === 'choice') { %>
+                <% try { var ops = JSON.parse(p.opciones_json || '[]'); } catch { var ops = []; } %>
+                <ul class="ip-opciones">
+                  <% ops.forEach(function(op, i) { %>
+                    <li><%= i + 1 %>. <%= op %></li>
+                  <% }) %>
+                </ul>
+              <% } %>
+              <div class="ip-acciones">
+                <form method="POST" action="/admin/examenes/<%= examen.id %>/preguntas/<%= p.id %>/borrar" style="display:inline" onclick="return confirm('Borrar esta pregunta?')">
+                  <button type="submit" class="btn btn-sm btn-danger">Borrar</button>
+                </form>
+              </div>
+            </li>
+          <% }) %>
+        </ul>
+      <% } else { %>
+        <div class="alert alert-error" style="margin-top:12px">Aun no hay preguntas. Agrega una arriba.</div>
+      <% } %>
+    </section>
+  </main>
+
+  <script>
+    const tipoSel = document.getElementById('tipo');
+    const bloqueChoice = document.getElementById('bloqueChoice');
+    if (tipoSel && bloqueChoice) {
+      function toggleChoice() { bloqueChoice.style.display = tipoSel.value === 'choice' ? 'block' : 'none'; }
+      tipoSel.addEventListener('change', toggleChoice);
+      toggleChoice();
+    }
+  </script>
+  <script src="/js/admin.js"></script>
+</body>
+</html>
